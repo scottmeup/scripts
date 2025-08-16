@@ -1,4 +1,10 @@
-set -x
+#!/bin/bash
+
+DEBUG=false
+
+if $DEBUG; then
+    set -x
+fi
 
 DOWNLOADS_DIRECTORY="/mnt/sdb2/common/downloads"    # Path to search for files
 OUTPUT_DIRECTORY="/tmp/qb-script"
@@ -16,9 +22,11 @@ else
     FREE_SPACE=`df -P "$DOWNLOADS_DIRECTORY" | tail -1 | awk '{print $4}'`    # Calculate free space in kilobytes
 fi
 
-echo "$MINIMUM_AGE_TO_DELETE"
-echo "$MINIMUM_FREE_SPACE_BEFORE_ESCALATION"
-echo "$FREE_SPACE"
+if $DEBUG; then
+    echo "$MINIMUM_AGE_TO_DELETE"
+    echo "$MINIMUM_FREE_SPACE_BEFORE_ESCALATION"
+    echo "$FREE_SPACE"
+fi
 
 if [ $FREE_SPACE -le $MINIMUM_FREE_SPACE_BEFORE_ESCALATION ]; then
     MINIMUM_AGE_TO_DELETE=$MINIMUM_AGE_TO_DELETE_ESCALATED    # Escalate deletion methods if disk space is running low
