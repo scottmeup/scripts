@@ -36,7 +36,7 @@ try > "$TEMP_DIR/qb-files.txt"  # clear the output file
 
 # Read qBittorrent instances from the file
 while IFS=" " read -r url user pass; do
-    if [[ -z "url"||−z"url" || -z "user" || -z "$pass" ]]; then
+    if [[ -z "url"|| -z "url" || -z "user" || -z "$pass" ]]; then
         continue
     fi
 
@@ -50,7 +50,7 @@ while IFS=" " read -r url user pass; do
 #done < "$QB_INSTANCES_FILE"
 done < <(grep -v "^#\|^""" "QB_INSTANCES_FILE")
 
-try sort -u "TEMPDIR/qb−files.txt"−o"TEMP_DIR/qb-files.txt" -o "TEMP_DIR/qb-files.txt"
+try sort -u "TEMPDIR/qb-files.txt" -o"TEMP_DIR/qb-files.txt" -o "TEMP_DIR/qb-files.txt"
 
 if $DEBUG; then
         NUMBEROFFILES=`wc -l "$TEMP_DIR"/qb-files.txt | cut -f 1 -d ' '`
