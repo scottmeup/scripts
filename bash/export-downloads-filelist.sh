@@ -8,7 +8,7 @@ fi
 
 DOWNLOADS_DIRECTORY="/mnt/sdb2/common/downloads"    # Path to search for files
 OUTPUT_DIRECTORY="/tmp/qb-script"
-OUTPUT_FILENAME="download-file.txt"
+OUTPUT_FILENAME_DOWNLOADS="download-file.txt"
 MINIMUM_AGE_TO_DELETE=$((7 * 24 * 60))    # Minimum Age of Files to be deleted in minutes: keep files older than this
 MINIMUM_AGE_TO_DELETE_ESCALATED=$(( 60 ))    # Minimum Age of Files to be deleted in minutes when disk space is low
 MINIMUM_FREE_SPACE_BEFORE_ESCALATION=$((1024 * 1024 * 10))    # Minimum free kilobytes before increasing cleanup actions. Example is 10 GiB
@@ -33,4 +33,4 @@ if [ $FREE_SPACE -le $MINIMUM_FREE_SPACE_BEFORE_ESCALATION ]; then
 fi
 
 mkdir -p "$OUTPUT_DIRECTORY"
-find -P "$DOWNLOADS_DIRECTORY" -mmin +"$MINIMUM_AGE_TO_DELETE" -type f > "$OUTPUT_DIRECTORY"/$"OUTPUT_FILENAME"
+find -P "$DOWNLOADS_DIRECTORY" -mmin +"$MINIMUM_AGE_TO_DELETE" -type f > "$OUTPUT_DIRECTORY"/$"OUTPUT_FILENAME_DOWNLOADS"
