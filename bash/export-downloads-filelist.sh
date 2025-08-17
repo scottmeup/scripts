@@ -1,6 +1,6 @@
 #!/bin/bash
 
-DEBUG=false
+DEBUG=true
 
 if $DEBUG; then
     set -x
@@ -15,9 +15,9 @@ MINIMUM_FREE_SPACE_BEFORE_ESCALATION=$((1024 * 1024 * 10))    # Minimum free kil
 MINIMUM_FREE_SPACE_BEFORE_ESCALATION_PERCENT=$(( 1 ))    # Minimum free percentage before increasing cleanup actions.
 FREE_SPACE_USE_PERCENTAGE=true   # true / false - use percentage of volume for free space escalation calculation instead of kilobytes if true
 
-IF [ $FREE_SPACE_USE_PERCENTAGE ]; then
-    FREE_SPACE=`df -P "$DOWNLOADS_DIRECTORY" | tail -1 | awk '{print $5}' | cut -f1 -d%`    # Caclulate free space as %
-    MINIMUM_FREE_SPACE_BEFORE_ESCALATION=MINIMUM_FREE_SPACE_BEFORE_ESCALATION_PERCENT
+if $FREE_SPACE_USE_PERCENTAGE; then
+    FREE_SPACE=$(( 100 - `df -P "$DOWNLOADS_DIRECTORY" | tail -1 | awk '{print $5}' | cut -f1 -d%` ))   # Caclulate free space as %
+    MINIMUM_FREE_SPACE_BEFORE_ESCALATION=$MINIMUM_FREE_SPACE_BEFORE_ESCALATION_PERCENT
 else
     FREE_SPACE=`df -P "$DOWNLOADS_DIRECTORY" | tail -1 | awk '{print $4}'`    # Calculate free space in kilobytes
 fi
