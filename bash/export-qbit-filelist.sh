@@ -14,9 +14,10 @@ try() { "$@" || die "cannot $*"; }
 # File containing qBittorrent instance definitions (one per line: URL USER PASSWORD)
 QB_INSTANCES_FILE="qb_instances.lst"
 
-# Temporary files
-TEMP_DIR="/tmp/qb-script"
-try mkdir -p "$TEMP_DIR"
+# Output file location
+OUTPUT_DIRECTORY="/tmp/qb-script"
+OUTPUT_FILENAME_QB="qb-files.txt"
+try mkdir -p "$OUTPUT_DIRECTORY"
 
 # Function to authenticate with qBittorrent and get session cookie
 qb_login() {
@@ -37,7 +38,7 @@ get_qbittorrent_files() {
 }
 
 echo "Processing qBittorrent instances..."
-try > "$TEMP_DIR/qb-files.txt"  # clear the output file
+try > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"  # clear the output file
 
 # Read qBittorrent instances from the file
 while IFS=" " read -r url user pass; do
@@ -45,22 +46,28 @@ while IFS=" " read -r url user pass; do
         continue
     fi
 
-    cookie_file="TEMPDIR/TEMP_DIR/(echo "$url" | md5sum | cut -d ' ' -f1)_cookie.txt"
+    cookie_file="$TEMPDIR"/"(echo "$url" | md5sum | cut -d ' ' -f1)_cookie.txt"
 
     echo "Authenticating with $url..."
     try qb_login "$url" "$user" "$pass" "$cookie_file"
 
     echo "Fetching files from $url..."
-    try get_qbittorrent_files "$url" "$cookie_file" >> "$TEMP_DIR/qb-files.txt"
+    try get_qbittorrent_files "$url" "$cookie_file" >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"
 #done < "$QB_INSTANCES_FILE"
 done < <(try grep -v "^#\|^$" "$QB_INSTANCES_FILE")
 
-try sort -u "$TEMP_DIR/qb-files.txt" -o "$TEMP_DIR/qb-files.txt"
+try sort -u "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB" -o "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"
 
 if $DEBUG; then
-        NUMBEROFFILES=`wc -l "$TEMP_DIR"/qb-files.txt | cut -f 1 -d ' '`
+        NUMBEROFFILES=`wc -l "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB" | cut -f 1 -d ' '`
         echo "Found $NUMBEROFFILES files:"
         if [ $NUMBEROFFILES -gt 0 ]; then
-            cat "$TEMP_DIR/qb-files.txt" | more
+            echo "3"
+            sleep 1
+            echo "2"
+            sleep 1
+            echo "1"
+            sleep 1
+            cat "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB" | more
         fi
 fi
