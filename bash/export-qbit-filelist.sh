@@ -56,7 +56,7 @@ while IFS=" " read -r url user pass; do
 #done < "$QB_INSTANCES_FILE"
 done < <(try grep -v "^#\|^$" "$QB_INSTANCES_FILE")
 
-try sort -u "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB" -o "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"
+#try sort -u "OUTPUTDIRECTORY"/"OUTPUT_DIRECTORY"/"OUTPUT_FILENAME_QB" -o "OUTPUTDIRECTORY"/"OUTPUT_DIRECTORY"/"OUTPUT_FILENAME_QB"
 
 if $DEBUG; then
         NUMBEROFFILES=`wc -l "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB" | cut -f 1 -d ' '`
