@@ -72,7 +72,7 @@ done < <(try grep -v "^#\|^$" "$QB_INSTANCES_FILE")
 
 if $DEBUG; then
     NUMBEROFFILES=$(wc -l < "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB")
-    echo "Found $NUMBEROFFILES .part files:"
+    echo "Found $NUMBEROFFILES .parts files:"
     if [ "$NUMBEROFFILES" -gt 0 ]; then
         echo "3"; sleep 1
         echo "2"; sleep 1
