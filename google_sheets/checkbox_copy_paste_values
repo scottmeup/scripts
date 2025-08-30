@@ -1,0 +1,48 @@
+function onEdit(e) {
+  try {
+    var range = e.range;                       // Cell that was edited
+    var sheet = range.getSheet();              // Sheet where edit happened
+    var sheetName = sheet.getName();
+
+    // Don't run on template sheets
+    if (sheetName.indexOf("Template") >= 0) return;
+
+    // Only run if sheet name contains "5/3/1"
+    if (sheetName.indexOf("5/3/1") === -1) return;
+
+    // For a single cell, checkboxes should return either true or false. Non-checkboxes will return null.
+    if (range.isChecked() === true){
+
+      // Check if background is white
+      Logger.log(range.getBackground());
+      if(range.getBackground()==="#ffffff"){
+
+        // Define the range as one column and three rows to the right of the checkbox
+        var targetRange = sheet.getRange(range.getRow(), range.getColumn() + 1, 1, 3);
+
+        // Copy values (not formulas) into same cells
+        var values = targetRange.getValues();
+        targetRange.setValues(values);
+      }
+
+    }
+
+    // Check if cell contains dropdown list
+    const rules = range.getDataValidation();
+    Logger.log(rules);
+    if (rules != null) {
+      const criteria = rules.getCriteriaType();
+      if(criteria==="")
+      Logger.log(criteria);
+      if(criteria==="VALUE_IN_RANGE"){
+
+      }
+    } else {
+      Logger.log('The cell does not have a data validation rule.');
+    }
+
+
+  } catch (err) {
+    Logger.log("Error: " + err);
+  }
+}
