@@ -27,21 +27,6 @@ function onEdit(e) {
 
     }
 
-    // Check if cell contains dropdown list
-    const rules = range.getDataValidation();
-    Logger.log(rules);
-    if (rules != null) {
-      const criteria = rules.getCriteriaType();
-      if(criteria==="")
-      Logger.log(criteria);
-      if(criteria==="VALUE_IN_RANGE"){
-
-      }
-    } else {
-      Logger.log('The cell does not have a data validation rule.');
-    }
-
-
   } catch (err) {
     Logger.log("Error: " + err);
   }
