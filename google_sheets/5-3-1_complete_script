@@ -73,9 +73,9 @@ function onEditInstallable(e){
           // --- CONFIGURATION ---
           var lookupSheetName = "PPL/C";     // name of sheet where lookup values are stored
           var keyColumn = 9;                  // column number in lookup sheet that stores the dropdown values (A = 1)
-          var returnColumns = [14, 15];         // columns in lookup sheet to fetch values from (M and N in this example)
+          var returnColumns = [13, 14];         // columns in lookup sheet to fetch values from (M and N in this example)
           var addAsNote = true;               
-          var addAsComment = true;           
+          // var addAsComment = true;        // Not currently available in google sheets    
           // ----------------------
 
           var lookupSheet = e.source.getSheetByName(lookupSheetName);
@@ -98,28 +98,41 @@ function onEditInstallable(e){
             return; // no match found
           }
 
-          // Collect return column values
-          var results = returnColumns.map(function(col) {
-            return lookupSheet.getRange(rowIndex + 1, col).getValue(); // +1 because array is indexed at 0
+          var results = [];
+          returnColumns.forEach(function(col) {
+            var val = lookupSheet.getRange(rowIndex + 1, col).getValue();
+            if (val !== "" && val !== null) {
+              results.push(val);
+            }
           });
 
           Logger.log("results = " + results);
           Logger.log("results.length = " + results.length)
 
-          var noteText = results.join("\n\n");
+          // Clear previous entries
+          range.setNote(null);
+          //range.clear({commentsOnly: true});
 
-          Logger.log("noteText = " +noteText);
+          if (results.length === 0) {
+            // No values to attach
+            return;
+          }
+          else{
+            var noteText = results.join("\n\n");
 
-          // Apply as note and/or comment
-          if (addAsNote) {
-            range.setNote(noteText);
+            Logger.log("noteText = " +noteText);
+
+            // Apply as note and/or comment
+            if (addAsNote) {
+              range.setNote(noteText);
+            }
+            /*
+            if (addAsComment) {
+              range.setComments(noteText);
+            }
+            */
+            return 0;
           }
-          if (addAsComment) {
-            // Remove any existing comments to avoid duplicates
-            
-            range.setComment(noteText);
-          }
-          return 0;
       }
     }
 
