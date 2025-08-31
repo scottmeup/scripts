@@ -1,4 +1,5 @@
-Logger = BetterLog.useSpreadsheet('1582macmqgdikO0M7RtyUnUq5kMw12gZbpHqU-XtzSsg'); 
+// NOTE: onEditInstallable() requires an 'On Edit' trigger to be added from the Apps Script menu that runs the function
+Logger = BetterLog.useSpreadsheet('redacted'); 
 
 function set_increment() {
   SpreadsheetApp.getActiveSheet().getRange('B6').setValue(SpreadsheetApp.getActiveSheet().getRange('B6').getValue() + 1);
@@ -17,79 +18,22 @@ function refresh_formulas() {
   SpreadsheetApp.flush();
 }
 
+/*
 function copy_paste_values_on_checkbox_tick(range, sheet){
-    // Check if background is white
-    Logger.log(range.getBackground());
-    if(range.getBackground()==="#ffffff"){
 
-      // Define the range as one column and three rows to the right of the checkbox
-      var targetRange = sheet.getRange(range.getRow(), range.getColumn() + 1, 1, 3);
-
-      // Copy values (not formulas) into same cells
-      var values = targetRange.getValues();
-      targetRange.setValues(values);
-      return 0;
-    }
-    return 1;
 }
 
 function copy_exercise_instructions_to_note(e, range){
-    // --- CONFIGURATION ---
-    var lookupSheetName = "PPL/C";     // name of sheet where lookup values are stored
-    var keyColumn = 9;                  // column number in lookup sheet that stores the dropdown values (A = 1)
-    var returnColumns = [14, 15];         // columns in lookup sheet to fetch values from (M and N in this example)
-    var addAsNote = true;               
-    var addAsComment = false;           
-    // ----------------------
-
-    var lookupSheet = e.source.getSheetByName(lookupSheetName);
-    var lastRow = lookupSheet.getLastRow();
-    var lookupValues = lookupSheet.getRange(1, keyColumn, lastRow).getValues();
-
-    Logger.log(lookupSheet);
-    Logger.log(lastRow);
-    Logger.log(lookupValues);
-
-    // Find the row in lookup sheet that matches newValue
-    var rowIndex = lookupValues.findIndex(function(row) {
-      return row[0] === newValue;
-    });
-
-    Logger.log(rowIndex);
-
-    if (rowIndex === -1) return; // no match found
-
-    // Collect return column values
-    var results = returnColumns.map(function(col) {
-      return lookupSheet.getRange(rowIndex + 1, col).getValue(); // +1 because array is indexed at 0
-    });
-
-    Logger.log(results);
-
-    var noteText = results.join("\n\n");
-
-    Logger.log(noteText);
-
-    // Apply as note and/or comment
-    if (addAsNote) {
-      range.setNote(noteText);
-    }
-    if (addAsComment) {
-      // Remove any existing comments to avoid duplicates
-      range.clearNote();
-      range.setComment(noteText);
-    }
-
 
 }
+*/
 
-
-function onEdit(e) {
+function onEditInstallable(e){
+  // Requires a trigger to be installed to handle on edit activation
   try {
     var range = e.range;                       // Cell that was edited
     var sheet = range.getSheet();              // Sheet where edit happened
     var sheetName = sheet.getName();
-    var newValue = range.getValue();
 
     // Don't run on template sheets
     if (sheetName.indexOf("Template") >= 0) return;
@@ -97,13 +41,126 @@ function onEdit(e) {
     // Only run if sheet name contains "5/3/1"
     if (sheetName.indexOf("5/3/1") === -1) return;
 
+    var newValue = range.getValue();
+
     // Check if cell is a checkbox that was edited to equal true. For a single cell, checkboxes should return either true or false and non-checkboxes will return null.
     if (range.isChecked() === true){
 
-      if(copy_paste_values_on_checkbox_tick(range, sheet)===0){
-        Logger.log("copy_paste_values_on_checkbox_tick ran")
-        return
-      };
+      // Check if background is white
+      Logger.log("range.getBackground() = " + range.getBackground());
+      if(range.getBackground()==="#ffffff"){
+
+        // Define the range as one column and three rows to the right of the checkbox
+        var targetRange = sheet.getRange(range.getRow(), range.getColumn() + 1, 1, 3);
+
+        // Copy values (not formulas) into same cells
+        var values = targetRange.getValues();
+        targetRange.setValues(values);
+        return 0;
+      }
+    }
+
+    // Check if cell contains dropdown list and is not empty
+    const rules = range.getDataValidation();
+    Logger.log("rules = " + rules);
+    Logger.log("newValue = " + newValue);
+    if (rules != null && newValue) {
+      const criteria = rules.getCriteriaType();
+      Logger.log("criteria = " + criteria);
+
+      if(criteria=="VALUE_IN_RANGE"){
+        //Logger.log(copy_exercise_instructions_to_note(e, range));
+          // --- CONFIGURATION ---
+          var lookupSheetName = "PPL/C";     // name of sheet where lookup values are stored
+          var keyColumn = 9;                  // column number in lookup sheet that stores the dropdown values (A = 1)
+          var returnColumns = [14, 15];         // columns in lookup sheet to fetch values from (M and N in this example)
+          var addAsNote = true;               
+          var addAsComment = true;           
+          // ----------------------
+
+          var lookupSheet = e.source.getSheetByName(lookupSheetName);
+          var lastRow = lookupSheet.getLastRow();
+          var lookupValues = lookupSheet.getRange(1, keyColumn, lastRow).getValues();
+
+          Logger.log("lookupSheet = " + lookupSheet);
+          Logger.log("lastRow = " + lastRow);
+          Logger.log("lookupValues = " + lookupValues);
+
+          // Find the row in lookup sheet that matches newValue
+          var rowIndex = lookupValues.findIndex(function(row) {
+            return row[0] === newValue;
+          });
+
+          Logger.log("rowIndex = " + rowIndex);
+
+          if (rowIndex === -1){
+            Logger.log("Search term '" + newValue + "' not found in lookup column");
+            return; // no match found
+          }
+
+          // Collect return column values
+          var results = returnColumns.map(function(col) {
+            return lookupSheet.getRange(rowIndex + 1, col).getValue(); // +1 because array is indexed at 0
+          });
+
+          Logger.log("results = " + results);
+          Logger.log("results.length = " + results.length)
+
+          var noteText = results.join("\n\n");
+
+          Logger.log("noteText = " +noteText);
+
+          // Apply as note and/or comment
+          if (addAsNote) {
+            range.setNote(noteText);
+          }
+          if (addAsComment) {
+            // Remove any existing comments to avoid duplicates
+            
+            range.setComment(noteText);
+          }
+          return 0;
+      }
+    }
+
+
+  } catch (err) {
+    Logger.log("Error: " + err);
+  }
+
+}
+
+/*
+//Runs every time a cell is edited
+function onEdit(e) {
+  try {
+    var range = e.range;                       // Cell that was edited
+    var sheet = range.getSheet();              // Sheet where edit happened
+    var sheetName = sheet.getName();
+
+    // Don't run on template sheets
+    if (sheetName.indexOf("Template") >= 0) return;
+
+    // Only run if sheet name contains "5/3/1"
+    if (sheetName.indexOf("5/3/1") === -1) return;
+
+    var newValue = range.getValue();
+
+    // Check if cell is a checkbox that was edited to equal true. For a single cell, checkboxes should return either true or false and non-checkboxes will return null.
+    if (range.isChecked() === true){
+
+      // Check if background is white
+      Logger.log(range.getBackground());
+      if(range.getBackground()==="#ffffff"){
+
+        // Define the range as one column and three rows to the right of the checkbox
+        var targetRange = sheet.getRange(range.getRow(), range.getColumn() + 1, 1, 3);
+
+        // Copy values (not formulas) into same cells
+        var values = targetRange.getValues();
+        targetRange.setValues(values);
+        return 0;
+      }
     }
 
     // Check if cell contains dropdown list and is not empty
@@ -114,11 +171,58 @@ function onEdit(e) {
       const criteria = rules.getCriteriaType();
       Logger.log(criteria);
 
-      if(criteria==="VALUE_IN_RANGE"){
-        Logger.log(copy_exercise_instructions_to_note(e));
+      if(criteria=="VALUE_IN_RANGE"){
+        //Logger.log(copy_exercise_instructions_to_note(e, range));
+          // --- CONFIGURATION ---
+          var lookupSheetName = "PPL/C";     // name of sheet where lookup values are stored
+          var keyColumn = 9;                  // column number in lookup sheet that stores the dropdown values (A = 1)
+          var returnColumns = [14, 15];         // columns in lookup sheet to fetch values from (M and N in this example)
+          var addAsNote = true;               
+          var addAsComment = true;           
+          // ----------------------
+
+          var lookupSheet = e.source.getSheetByName(lookupSheetName);
+          var lastRow = lookupSheet.getLastRow();
+          var lookupValues = lookupSheet.getRange(1, keyColumn, lastRow).getValues();
+
+          Logger.log(lookupSheet);
+          Logger.log(lastRow);
+          Logger.log(lookupValues);
+
+          // Find the row in lookup sheet that matches newValue
+          var rowIndex = lookupValues.findIndex(function(row) {
+            return row[0] === newValue;
+          });
+
+          Logger.log(rowIndex);
+
+          if (rowIndex === -1){
+            Logger.log("Search term not found in lookup column");
+            return; // no match found
+          }
+
+          // Collect return column values
+          var results = returnColumns.map(function(col) {
+            return lookupSheet.getRange(rowIndex + 1, col).getValue(); // +1 because array is indexed at 0
+          });
+
+          Logger.log(results);
+
+          var noteText = results.join("\n\n");
+
+          Logger.log(noteText);
+
+          // Apply as note and/or comment
+          if (addAsNote) {
+            range.setNote(noteText);
+          }
+          if (addAsComment) {
+            // Remove any existing comments to avoid duplicates
+            
+            range.setComment(noteText);
+          }
+          return 0;
       }
-    } else {
-      Logger.log('The cell is empty or does not have a data validation rule.');
     }
 
 
@@ -126,3 +230,4 @@ function onEdit(e) {
     Logger.log("Error: " + err);
   }
 }
+*/
