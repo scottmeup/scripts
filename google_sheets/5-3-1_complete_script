@@ -1,0 +1,128 @@
+Logger = BetterLog.useSpreadsheet('1582macmqgdikO0M7RtyUnUq5kMw12gZbpHqU-XtzSsg'); 
+
+function set_increment() {
+  SpreadsheetApp.getActiveSheet().getRange('B6').setValue(SpreadsheetApp.getActiveSheet().getRange('B6').getValue() + 1);
+}
+
+function set_decrement() {
+  SpreadsheetApp.getActiveSheet().getRange('B6').setValue(Math.max((SpreadsheetApp.getActiveSheet().getRange('B6').getValue() - 1), 0) );
+}
+
+function set_reset() {
+    SpreadsheetApp.getActiveSheet().getRange('B6').setValue(0);
+}
+
+function refresh_formulas() {
+  //const sheet = SpreadsheetApp.getActive();
+  SpreadsheetApp.flush();
+}
+
+function copy_paste_values_on_checkbox_tick(range, sheet){
+    // Check if background is white
+    Logger.log(range.getBackground());
+    if(range.getBackground()==="#ffffff"){
+
+      // Define the range as one column and three rows to the right of the checkbox
+      var targetRange = sheet.getRange(range.getRow(), range.getColumn() + 1, 1, 3);
+
+      // Copy values (not formulas) into same cells
+      var values = targetRange.getValues();
+      targetRange.setValues(values);
+      return 0;
+    }
+    return 1;
+}
+
+function copy_exercise_instructions_to_note(e, range){
+    // --- CONFIGURATION ---
+    var lookupSheetName = "PPL/C";     // name of sheet where lookup values are stored
+    var keyColumn = 9;                  // column number in lookup sheet that stores the dropdown values (A = 1)
+    var returnColumns = [14, 15];         // columns in lookup sheet to fetch values from (M and N in this example)
+    var addAsNote = true;               
+    var addAsComment = false;           
+    // ----------------------
+
+    var lookupSheet = e.source.getSheetByName(lookupSheetName);
+    var lastRow = lookupSheet.getLastRow();
+    var lookupValues = lookupSheet.getRange(1, keyColumn, lastRow).getValues();
+
+    Logger.log(lookupSheet);
+    Logger.log(lastRow);
+    Logger.log(lookupValues);
+
+    // Find the row in lookup sheet that matches newValue
+    var rowIndex = lookupValues.findIndex(function(row) {
+      return row[0] === newValue;
+    });
+
+    Logger.log(rowIndex);
+
+    if (rowIndex === -1) return; // no match found
+
+    // Collect return column values
+    var results = returnColumns.map(function(col) {
+      return lookupSheet.getRange(rowIndex + 1, col).getValue(); // +1 because array is indexed at 0
+    });
+
+    Logger.log(results);
+
+    var noteText = results.join("\n\n");
+
+    Logger.log(noteText);
+
+    // Apply as note and/or comment
+    if (addAsNote) {
+      range.setNote(noteText);
+    }
+    if (addAsComment) {
+      // Remove any existing comments to avoid duplicates
+      range.clearNote();
+      range.setComment(noteText);
+    }
+
+
+}
+
+
+function onEdit(e) {
+  try {
+    var range = e.range;                       // Cell that was edited
+    var sheet = range.getSheet();              // Sheet where edit happened
+    var sheetName = sheet.getName();
+    var newValue = range.getValue();
+
+    // Don't run on template sheets
+    if (sheetName.indexOf("Template") >= 0) return;
+
+    // Only run if sheet name contains "5/3/1"
+    if (sheetName.indexOf("5/3/1") === -1) return;
+
+    // Check if cell is a checkbox that was edited to equal true. For a single cell, checkboxes should return either true or false and non-checkboxes will return null.
+    if (range.isChecked() === true){
+
+      if(copy_paste_values_on_checkbox_tick(range, sheet)===0){
+        Logger.log("copy_paste_values_on_checkbox_tick ran")
+        return
+      };
+    }
+
+    // Check if cell contains dropdown list and is not empty
+    const rules = range.getDataValidation();
+    Logger.log(rules);
+    Logger.log(newValue);
+    if (rules != null && newValue) {
+      const criteria = rules.getCriteriaType();
+      Logger.log(criteria);
+
+      if(criteria==="VALUE_IN_RANGE"){
+        Logger.log(copy_exercise_instructions_to_note(e));
+      }
+    } else {
+      Logger.log('The cell is empty or does not have a data validation rule.');
+    }
+
+
+  } catch (err) {
+    Logger.log("Error: " + err);
+  }
+}
