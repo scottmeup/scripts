@@ -1,5 +1,7 @@
 #!/bin/bash
 
+# Grabs filename if torrent is only one file, otherwise grabs directory name
+
 DEBUG=true
 
 if $DEBUG; then
