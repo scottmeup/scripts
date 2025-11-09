@@ -33,6 +33,7 @@ qb_login() {
 
 # Function to get list of files from a qBittorrent instance
 # content_path returns the absolute path for single-file torrents, or the parent directory for multi-file torrents
+# See: https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorrent-4.1)#get-torrent-list for more information 
 get_qbittorrent_files() {
     local url="$1"
     local cookie_file="$2"
