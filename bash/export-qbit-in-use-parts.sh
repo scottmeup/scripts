@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# Generate a list of .parts files belonging to torrents currently managed by qBittorrent
+
 DEBUG=false
 
 if $DEBUG; then
