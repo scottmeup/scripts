@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# Generate a list of all active files managed by qBittorrent
+
 DEBUG=false
 
 if $DEBUG; then
