@@ -1,8 +1,6 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-# Grabs filename if torrent is only one file, otherwise grabs directory name
-
-DEBUG=true
+DEBUG=false
 
 if $DEBUG; then
     set -x
@@ -15,6 +13,11 @@ try() { "$@" || die "cannot $*"; }
 
 # File containing qBittorrent instance definitions (one per line: URL USER PASSWORD)
 QB_INSTANCES_FILE="qb_instances.lst"
+
+if [[ ! -f "$QB_INSTANCES_FILE" ]]; then
+  echo "Missing qb_instances.lst file"
+  exit 1
+fi
 
 # Output file location
 OUTPUT_DIRECTORY="/tmp/qb-script"
@@ -32,14 +35,110 @@ qb_login() {
 }
 
 # Function to get list of files from a qBittorrent instance
-# content_path returns the absolute path for single-file torrents, or the parent directory for multi-file torrents
-# See: https://github.com/qbittorrent/qBittorrent/wiki/WebUI-API-(qBittorrent-4.1)#get-torrent-list for more information 
 get_qbittorrent_files() {
     local url="$1"
     local cookie_file="$2"
 
-    try curl -s --cookie "$cookie_file" "$url/api/v2/torrents/info" | jq -r '.[].content_path'
+    # Get torrents info (hash, save_path, content_path)
+    local TORRENTS_JSON
+    TORRENTS_JSON=$(curl -s --cookie "$cookie_file" "${url}/api/v2/torrents/info")
+     if [[ -z "$cookie_file" ]]; then
+        echo "Failed to log in to qBittorrent at $url" >&2
+        return 1
+    fi
+
+    # associative arrays for uniqueness
+    declare -A SAVE_PATHS=()
+    declare -A ALL_FILES=()
+    declare -A ALL_DIRS=()
+
+    # Get torrents info JSON
+    local TORRENTS_JSON
+    TORRENTS_JSON=$(curl -s --cookie "$cookie_file" "${url%/}/api/v2/torrents/info" || echo "[]")
+
+    # Iterate torrents without creating subshells
+    while IFS= read -r torrent; do
+        local HASH SAVE_PATH CONTENT_PATH FILES_JSON FILE_COUNT
+        HASH=$(jq -r '.hash' <<<"$torrent")
+        SAVE_PATH=$(jq -r '.save_path' <<<"$torrent")
+        CONTENT_PATH=$(jq -r '.content_path' <<<"$torrent")
+
+        # normalize (remove trailing slash)
+        SAVE_PATH="${SAVE_PATH%/}"
+        CONTENT_PATH="${CONTENT_PATH%/}"
+
+        # record unique save_path
+        SAVE_PATHS["$SAVE_PATH"]=1
+
+        # get files json for this torrent
+        FILES_JSON=$(curl -s --cookie "$cookie_file" "${url%/}/api/v2/torrents/files?hash=${HASH}" || echo "[]")
+        # safe file count
+        FILE_COUNT=$(jq 'length' <<<"$FILES_JSON" 2>/dev/null || echo 0)
+
+        if [[ "$FILE_COUNT" -le 1 ]]; then
+            # single-file torrent: content_path should be full file path
+            if [[ -n "$CONTENT_PATH" && "$CONTENT_PATH" != "null" ]]; then
+                ALL_FILES["$CONTENT_PATH"]=1
+            else
+                # fallback: use files[0].name appended to save_path
+                local SINGLE_NAME
+                SINGLE_NAME=$(jq -r '.[0].name // ""' <<<"$FILES_JSON")
+                if [[ -n "$SINGLE_NAME" ]]; then
+                    local FULL="${SAVE_PATH}/${SINGLE_NAME}"
+                    FULL="${FULL//\/\//\/}"
+                    ALL_FILES["$FULL"]=1
+                fi
+            fi
+        else
+            # multi-file torrent: get list of relative names without subshell
+            mapfile -t rels < <(jq -r '.[] | .name' <<<"$FILES_JSON")
+            for REL_NAME in "${rels[@]}"; do
+                # remove any leading slash from REL_NAME and join
+                REL_NAME="${REL_NAME#/}"
+                local FULL="${CONTENT_PATH}/${REL_NAME}"
+                FULL="${FULL//\/\//\/}"
+                ALL_FILES["$FULL"]=1
+            done
+        fi
+    done < <(jq -c '.[]' <<<"$TORRENTS_JSON")
+
+    # Build parent directories up to but NOT including the matching save_path
+    for file_path in "${!ALL_FILES[@]}"; do
+        # normalize
+        file_path="${file_path%/}"
+
+        # find the longest matching save_path (handles nested save_paths)
+        local matching_save=""
+        local longest_len=0
+        for sp in "${!SAVE_PATHS[@]}"; do
+            [[ -z "$sp" ]] && continue
+            if [[ "$file_path" == "$sp" ]] || [[ "$file_path" == "$sp/"* ]]; then
+                local l=${#sp}
+                if (( l > longest_len )); then
+                    longest_len=$l
+                    matching_save="$sp"
+                fi
+            fi
+        done
+
+        [[ -z "$matching_save" ]] && continue
+
+        local dirpath
+        dirpath=$(dirname "$file_path")
+        while [[ -n "$dirpath" && "$dirpath" != "/" && "$dirpath" != "$matching_save" ]]; do
+            ALL_DIRS["${dirpath%/}/"]=1
+            dirpath=$(dirname "$dirpath")
+        done
+    done
+
+    # Output: save_paths, directories, files (unique)
+    {
+        for sp in "${!SAVE_PATHS[@]}"; do printf '%s\n' "$sp"; done
+        for d in "${!ALL_DIRS[@]}"; do printf '%s\n' "$d"; done
+        for f in "${!ALL_FILES[@]}"; do printf '%s\n' "$f"; done
+    }
 }
+# END get_qbittorrent_files()
 
 echo "Processing qBittorrent instances..."
 try > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"  # clear the output file
@@ -57,10 +156,9 @@ while IFS=" " read -r url user pass; do
 
     echo "Fetching files from $url..."
     try get_qbittorrent_files "$url" "$cookie_file" >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"
-#done < "$QB_INSTANCES_FILE"
 done < <(try grep -v "^#\|^$" "$QB_INSTANCES_FILE")
 
-#try sort -u "OUTPUTDIRECTORY"/"OUTPUT_DIRECTORY"/"OUTPUT_FILENAME_QB" -o "OUTPUTDIRECTORY"/"OUTPUT_DIRECTORY"/"OUTPUT_FILENAME_QB"
+try sort -u "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB" -o "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"
 
 if $DEBUG; then
         NUMBEROFFILES=`wc -l "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB" | cut -f 1 -d ' '`
