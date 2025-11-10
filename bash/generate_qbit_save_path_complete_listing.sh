@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+# Generate a list of all files & directories in locations used by qBittorrent to store downloads
+
 DEBUG=false
 
 if $DEBUG; then
