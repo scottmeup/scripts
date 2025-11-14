@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-# Generate a list of all files & directories in locations used by qBittorrent to store downloads
-
 DEBUG=false
 
 if $DEBUG; then
@@ -25,6 +23,16 @@ fi
 OUTPUT_DIRECTORY="/tmp/qb-script"
 OUTPUT_FILENAME_SAVE_PATHS="qb-save-paths.txt"
 OUTPUT_FILENAME_ALL_FILES="save-path-all-files.txt"
+OUTPUT_FILENAME_ALL_DIRECTORIES="save-path-all-directories.txt"
+OUTPUT_MINIMUM_AGE_DAYS=14    #Minimum age of files to add to output - calculated on date last modified
+
+
+OUTPUT_MINIMUM_AGE_MINUTES=$(( OUTPUT_MINIMUM_AGE_DAYS*60*24 ))
+
+if $DEBUG; then
+    echo "Minimum Age is $OUTPUT_MINIMUM_AGE_MINUTES minutes" >> "$OUTPUT_DIRECTORY"/minimum-age.txt
+fi
+
 try mkdir -p "$OUTPUT_DIRECTORY"
 
 # Function to authenticate with qBittorrent and get session cookie
@@ -133,6 +141,7 @@ mv "$TMP_FILE" "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
 
 # Get directories listing
 all_files=()
+all_directories=()
 
 for dir in "${pruned[@]}"; do
     # Check directory exists before trying to list
@@ -140,25 +149,30 @@ for dir in "${pruned[@]}"; do
         # Use command substitution to capture find output into array
         while IFS= read -r file; do
             all_files+=("$file")
-        done < <(find "$dir" -type f 2>/dev/null)
+        done < <(find "$dir" -type f -mmin +$OUTPUT_MINIMUM_AGE_MINUTES 2>/dev/null)
+        while IFS= read -r directory; do
+            all_directories+=("$directory")
+        done < <(find "$dir" -type d -mmin +$OUTPUT_MINIMUM_AGE_MINUTES 2>/dev/null)
     else
         echo "Warning: '$dir' is not a valid directory" >&2
     fi
 done
 
 printf "%s\n" "${all_files[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_FILES"
+printf "%s\n" "${all_directories[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_DIRECTORIES"
 
 if $DEBUG; then
-        NUMBER_OF_SAVE_PATHS=`wc -l "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS" | cut -f 1 -d ' '`
+    NUMBER_OF_SAVE_PATHS=`wc -l "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS" | cut -f 1 -d ' '`
 	NUMBER_OF_FILES=`wc -l "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_FILES" | cut -f 1 -d ' '`
-        echo "Found $NUMBER_OF_SAVE_PATHS save paths and $NUMBER_OF_FILES files:"
-        if [ $NUMBER_OF_FILES -gt 0 ]; then
-            echo "3"
-            sleep 1
-            echo "2"
-            sleep 1
-            echo "1"
-            sleep 1
-            cat "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_FILES" | more
-        fi
+    NUMBER_OF_DIRECTORIES=`wc -l "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_DIRECTORIES" | cut -f 1 -d ' '`
+    echo "Found $NUMBER_OF_SAVE_PATHS save paths, $NUMBER_OF_FILES files, $NUMBER_OF_DIRECTORIES directories:"
+    if [ $NUMBER_OF_FILES -gt 0 ]; then
+        echo "3"
+        sleep 1
+        echo "2"
+        sleep 1
+        echo "1"
+        sleep 1
+        cat "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_FILES" | more
+    fi
 fi
