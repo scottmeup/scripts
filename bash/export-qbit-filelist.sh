@@ -22,7 +22,8 @@ fi
 # Output file location
 OUTPUT_DIRECTORY="/tmp/qb-script"
 OUTPUT_FILENAME_QB="qb-files.txt"
-MISSING_FILES_FILENAME="qb-files-missing.txt"
+MISSING_FILE_LIST_FILENAME="qb-files-missing.txt"
+EXISTING_FILE_LIST_FILENAME="qb-files-existing.txt"
 try mkdir -p "$OUTPUT_DIRECTORY"
 
 # Function to authenticate with qBittorrent and get session cookie
@@ -167,18 +168,24 @@ done < <(try grep -v "^#\|^$" "$QB_INSTANCES_FILE")
 try sort -u "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB" -o "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"
 
 
-# Check files in the list exist, create a list of missing files
+# Check files in the list exist, create a list of missing files and existing files
 
-if [[ -e "$OUTPUT_DIRECTORY"/"$MISSING_FILES_FILENAME" ]]; then
-	try rm "$OUTPUT_DIRECTORY"/"$MISSING_FILES_FILENAME"
+if [[ -e "$OUTPUT_DIRECTORY"/"$MISSING_FILE_LIST_FILENAME" ]]; then
+	try rm "$OUTPUT_DIRECTORY"/"$MISSING_FILE_LIST_FILENAME"
 fi
+if [[ -e "$OUTPUT_DIRECTORY"/"$EXISTING_FILE_LIST_FILENAME" ]]; then
+        try rm "$OUTPUT_DIRECTORY"/"$EXISTING_FILE_LIST_FILENAME"
+fi
+
 while IFS= read -r file; do
-    if ! [[ -e $file ]]; then
-        if $DEBUG; then
-            printf '%s does not exist\n' "$file"
-        fi
-	    printf '%s\n' "$file" >> "$OUTPUT_DIRECTORY"/"$MISSING_FILES_FILENAME"
-    fi
+	if ! [[ -e $file ]]; then
+		if $DEBUG; then
+			printf '%s does not exist\n' "$file"
+		fi
+		printf '%s\n' "$file" >> "$OUTPUT_DIRECTORY"/"$MISSING_FILE_LIST_FILENAME"
+        else
+		printf '%s\n' "$file" >> "$OUTPUT_DIRECTORY"/"$EXISTING_FILE_LIST_FILENAME"
+	fi
 done < <(try cat "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB")
 
 
