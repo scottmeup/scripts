@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-# Generate a list of all active files managed by qBittorrent
-
 DEBUG=false
 
 if $DEBUG; then
@@ -24,6 +22,7 @@ fi
 # Output file location
 OUTPUT_DIRECTORY="/tmp/qb-script"
 OUTPUT_FILENAME_QB="qb-files.txt"
+MISSING_FILES_FILENAME="qb-files-missing.txt"
 try mkdir -p "$OUTPUT_DIRECTORY"
 
 # Function to authenticate with qBittorrent and get session cookie
@@ -97,7 +96,11 @@ get_qbittorrent_files() {
             for REL_NAME in "${rels[@]}"; do
                 # remove any leading slash from REL_NAME and join
                 REL_NAME="${REL_NAME#/}"
-                local FULL="${CONTENT_PATH}/${REL_NAME}"
+                #
+                # Pretty sure bug is here: CONTENT_PATH and REL_NAME both contain the base folder of the data
+                #
+                #local FULL="${CONTENT_PATH}/${REL_NAME}"
+                local FULL="${SAVE_PATH}/${REL_NAME}"
                 FULL="${FULL//\/\//\/}"
                 ALL_FILES["$FULL"]=1
             done
@@ -145,6 +148,7 @@ get_qbittorrent_files() {
 echo "Processing qBittorrent instances..."
 try > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"  # clear the output file
 
+
 # Read qBittorrent instances from the file
 while IFS=" " read -r url user pass; do
     if [[ -z "$url" || -z "$user" || -z "$pass" ]]; then
@@ -161,6 +165,22 @@ while IFS=" " read -r url user pass; do
 done < <(try grep -v "^#\|^$" "$QB_INSTANCES_FILE")
 
 try sort -u "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB" -o "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"
+
+
+# Check files in the list exist, create a list of missing files
+
+if [[ -e "$OUTPUT_DIRECTORY"/"$MISSING_FILES_FILENAME" ]]; then
+	try rm "$OUTPUT_DIRECTORY"/"$MISSING_FILES_FILENAME"
+fi
+while IFS= read -r file; do
+    if ! [[ -e $file ]]; then
+        if $DEBUG; then
+            printf '%s does not exist\n' "$file"
+        fi
+	    printf '%s\n' "$file" >> "$OUTPUT_DIRECTORY"/"$MISSING_FILES_FILENAME"
+    fi
+done < <(try cat "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB")
+
 
 if $DEBUG; then
         NUMBEROFFILES=`wc -l "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB" | cut -f 1 -d ' '`
