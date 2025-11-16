@@ -1,4 +1,5 @@
 - Place script files in /opt/script
 - Make files executable
 - Place systemd unit + timer files in /etc/systemd/system
+- Reload systemd daemon
 - Enable / start systemd units / timers
