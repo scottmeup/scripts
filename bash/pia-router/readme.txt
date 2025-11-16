@@ -1,3 +1,4 @@
-- Place files in /opt/script
+- Place script files in /opt/script
 - Make files executable
-- Enable run on boot with systemd unit file
+- Place systemd unit + timer files in /etc/systemd/system
+- Enable / start systemd units / timers
