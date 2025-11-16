@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Grabs filename if torrent is only one file, otherwise grabs directory name
 
