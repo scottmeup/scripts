@@ -1,0 +1,3 @@
+- Place files in /opt/script
+- Make files executable
+- Enable run on boot with systemd unit file
