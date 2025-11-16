@@ -1,0 +1,13 @@
+[Unit]
+Description=Disable IP forwarding before PIA VPN stops
+Before=piavpn.service
+PartOf=piavpn.service
+Requires=piavpn.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/sysctl -w net.ipv4.ip_forward=0
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

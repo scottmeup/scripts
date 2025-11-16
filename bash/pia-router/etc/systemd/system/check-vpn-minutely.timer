@@ -1,0 +1,9 @@
+[Unit]
+Description=Check VPN status on boot and every 15 minutes
+
+[Timer]
+OnBootSec=15s
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target

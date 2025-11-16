@@ -1,0 +1,17 @@
+[Unit]
+Description=Monitor changes to eth0 and trigger a script
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+StartLimitBurst=10
+StartLimitIntervalSec=1
+ExecStart=/opt/script/monitor-eth0
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

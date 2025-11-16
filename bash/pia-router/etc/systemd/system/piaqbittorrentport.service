@@ -1,0 +1,6 @@
+[Unit]
+Description=Update qbittorrent port from PIA
+
+[Service]
+Type=oneshot
+ExecStart=usr/bin/env bash /opt/script/piaqbittorrentport

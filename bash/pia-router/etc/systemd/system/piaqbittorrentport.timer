@@ -1,0 +1,9 @@
+[Unit]
+Description=Timer to run service to update qbittorrent port from PIA 
+
+[Timer]
+OnUnitActiveSec=900s
+OnBootSec=60s
+
+[Install]
+WantedBy=timers.target

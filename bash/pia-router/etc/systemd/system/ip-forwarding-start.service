@@ -1,0 +1,13 @@
+[Unit]
+Description=Enable IP forwarding
+Requires=piavpn.service
+After=piavpn.service
+
+[Service]
+ExecStartPre=/bin/sleep 10
+Type=oneshot
+ExecStart=/usr/sbin/sysctl -w net.ipv4.ip_forward=1
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

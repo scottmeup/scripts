@@ -1,0 +1,13 @@
+[Unit]
+Description=Monitor PIA debug logs
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/opt/scripts/pialogmonitor
+Type=oneshot
+RemainAfterExit=true
+User=root
+
+[Install]
+WantedBy=multi-user.target

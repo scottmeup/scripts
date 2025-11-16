@@ -1,0 +1,12 @@
+[Unit]
+Description=Private Internet Access Connector
+Requires=multi-user.target
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/piactl -d -t30 connect
+RemainAfterExit=yes
+
+[Install]
+WantedBy=piavpn.service
