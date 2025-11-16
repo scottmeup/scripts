@@ -11,5 +11,7 @@ WEBUI_PORT=8080
 #read PIA forwarded port
 FORWARDED_PORT=$(piactl get portforward)
 
+echo `date +%F\ %T` "Updating port with"  $forwarded_port
+
 curl -k -i -X POST -d "json={\"random_port\": false}" "http://${WEBUI_HOST}:${WEBUI_PORT}/api/v2/app/setPreferences"
 curl -k -i -X POST -d "json={\"listen_port\": ${FORWARDED_PORT}}" "http://${WEBUI_HOST}:${WEBUI_PORT}/api/v2/app/setPreferences"
