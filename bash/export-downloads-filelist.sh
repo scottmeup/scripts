@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-DEBUG=true
+DEBUG=false
 
 if $DEBUG; then
     set -x
