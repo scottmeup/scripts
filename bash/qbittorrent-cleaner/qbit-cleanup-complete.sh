@@ -432,7 +432,7 @@ find_non_common_elements_associative() {
 
 
 QBITTORRENT_UNMANAGED_FILES=$(find_non_common_elements_associative ALL_FILES[@] FILES_EXISTING[@] FILTERED_FILES
-QBITTORRENT_UNMANAGED_DIRECTORIES=$(find_non_common_elements_associative "ALL_FILES[@] ALL_DIRS[@] FILTERED_FILES
+QBITTORRENT_UNMANAGED_DIRECTORIES=$(find_non_common_elements_associative ALL_FILES[@] ALL_DIRS[@] FILTERED_FILES
 
 output_file_list_filtered_files(){
      for file in "${!QBITTORRENT_UNMANAGED_FILES[@]}"; do printf '%s\n' "$file"; done
