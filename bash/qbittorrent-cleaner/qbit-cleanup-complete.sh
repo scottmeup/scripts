@@ -203,7 +203,7 @@ if $DEBUG; then
         sleep 1
         echo "1"
         sleep 1
-        cat "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_FILES" | more
+        cat "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_FILES"  #| more
     fi
 fi
 
@@ -443,7 +443,7 @@ output_file_list_filtered_files(){
          fi;
     done 
 }
-}
+
 
 output_file_list_filtered_directories(){
     for file in "${!QBITTORRENT_UNMANAGED_DIRECTORIES[@]}"; do printf '%s\n' "$file" 
@@ -473,7 +473,7 @@ if $DEBUG; then
             sleep 1
             echo "1"
             sleep 1
-            cat "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB" | more
+            cat "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB" # | more
         fi
 fi
 
