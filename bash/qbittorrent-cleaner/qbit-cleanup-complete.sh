@@ -152,18 +152,18 @@ printf "%s\n" "${pruned[@]}" > "$TMP_FILE"
 mv "$TMP_FILE" "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
 
 # Get listing of files and directories within search paths
-all_files=()
-all_directories=()
+ALL_FILES=()
+ALL_DIRECTORIES=()
 
 for dir in "${pruned[@]}"; do
     # Check directory exists before trying to list
     if [[ -d "$dir" ]]; then
         # Use command substitution to capture find output into array
         while IFS= read -r file; do
-            all_files+=("$file")
+            ALL_FILES+=("$file")
         done < <(find "$dir" -type f -mmin +$OUTPUT_MINIMUM_AGE_MINUTES 2>/dev/null)
         while IFS= read -r directory; do
-            all_directories+=("$directory")
+            ALL_DIRECTORIES+=("$directory")
         done < <(find "$dir" -type d -mmin +$OUTPUT_MINIMUM_AGE_MINUTES 2>/dev/null)
     else
         echo "Warning: '$dir' is not a valid directory" >&2
@@ -174,7 +174,7 @@ done
 # Sort directories from deepest to shallowest
 tmp=()
 
-for dir in "${all_directories[@]}"; do
+for dir in "${ALL_DIRECTORIES[@]}"; do
     depth=$(grep -o "/" <<< "$dir" | wc -l)
     tmp+=("$depth:$dir")
 done
@@ -183,13 +183,13 @@ done
 sorted_tmp=$(printf "%s\n" "${tmp[@]}" | sort -t: -k1,1nr)
 
 # Extract the directory names back into an array
-sorted_directories=()
+SORTED_DIRECTORIES=()
 while IFS= read -r line; do
-    sorted_directories+=("${line#*:}")
+    SORTED_DIRECTORIES+=("${line#*:}")
 done <<< "$sorted_tmp"
 
-printf "%s\n" "${all_files[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_FILES"
-printf "%s\n" "${sorted_directories[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_DIRECTORIES"
+printf "%s\n" "${ALL_FILES[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_FILES"
+printf "%s\n" "${SORTED_DIRECTORIES[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_DIRECTORIES"
 
 if $DEBUG; then
     NUMBER_OF_SAVE_PATHS=`wc -l "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS" | cut -f 1 -d ' '`
@@ -457,7 +457,7 @@ output_file_list_filtered_directories(){
 # output result files
 try output_file_list_qbittorrent_existing > "$OUTPUT_DIRECTORY"/"$FILE_LIST_EXISTING_FILENAME"
 try output_file_list_qbittorrent_missing > "$OUTPUT_DIRECTORY"/"$FILE_LIST_MISSING_FILENAME"
-try output_file_list_filtered_files >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_COMPLETE_LIST"
+try output_file_list_filtered_files > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_COMPLETE_LIST"
 try output_file_list_filtered_directories >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_COMPLETE_LIST"
 
 
