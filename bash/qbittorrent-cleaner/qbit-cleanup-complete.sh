@@ -371,7 +371,7 @@ while IFS= read -r file; do
         FILES_MISSING["$file"]=1
         else
         #printf '%s\n' "$file" >> "$OUTPUT_DIRECTORY"/"$FILE_LIST_EXISTING_FILENAME"
-        FILES_EXISTING["$FILE"]=1
+        FILES_EXISTING["$file"]=1
     fi
 done < <(try cat "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB")
 
