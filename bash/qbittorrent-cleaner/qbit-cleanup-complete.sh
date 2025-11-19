@@ -426,7 +426,7 @@ find_non_common_elements_associative() {
 
     # Append only entries found in qb_lookup
     for item in "${_all[@]}"; do
-        if ![[ -z "${qb_lookup[$item]}" ]]; then
+        if [[ -n "${qb_lookup[$item]}" ]]; then
             _out+=("$item")
         fi
     done
@@ -454,13 +454,18 @@ output_file_list_filtered_directories(){
 }
 
 
+
 # output result files
 try output_file_list_qbittorrent_existing > "$OUTPUT_DIRECTORY"/"$FILE_LIST_EXISTING_FILENAME"
 try output_file_list_qbittorrent_missing > "$OUTPUT_DIRECTORY"/"$FILE_LIST_MISSING_FILENAME"
-try output_file_list_filtered_files > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_COMPLETE_LIST"
-try output_file_list_filtered_directories >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_COMPLETE_LIST"
+#try output_file_list_filtered_files > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_COMPLETE_LIST"
+#try output_file_list_filtered_directories >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_COMPLETE_LIST"
 
 
+{
+    output_file_list_filtered_files
+    output_file_list_filtered_directories
+} > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_COMPLETE_LIST"
 
 
 if $DEBUG; then
