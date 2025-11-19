@@ -388,37 +388,51 @@ output_file_list_qbittorrent_missing(){
 
 # Function to find common elements using associative arrays
 find_common_elements_associative() {
-    local -A array1=("$@")
-    local -A array2=("${!2}")
-    local -a common_elements=()
+    local -n _all="$1"       # nameref to input array 1
+    local -n _qb="$2"        # nameref to input array 2
+    local -n _out="$3"       # nameref to output array
 
-    for element in "${!array1[@]}"; do
-        if [[ "${array2[$element]}" ]]; then
-            common_elements+=("$element")
-        fi
+    declare -A qb_lookup     # associative array for fast membership test
+    _out=()                  # initialize output array
+
+    # Load all qb_files entries into associative array
+    for item in "${_qb[@]}"; do
+        qb_lookup["$item"]=1
     done
 
-    echo "${common_elements[@]}"
+    # Append only entries NOT found in qb_lookup
+    for item in "${_all[@]}"; do
+        if [[ -z "${qb_lookup[$item]}" ]]; then
+            _out+=("$item")
+        fi
+    done
 }
 
 # Function to find unique elements using associative arrays
 find_non_common_elements_associative() {
-    local -A array1=("$@")
-    local -A array2=("${!2}")
-    local -a non_common_elements=()
+    local -n _all="$1"       # nameref to input array 1
+    local -n _qb="$2"        # nameref to input array 2
+    local -n _out="$3"       # nameref to output array
 
-    for element in "${!array1[@]}"; do
-        if ![[ "${array2[$element]}" ]]; then
-            non_common_elements+=("$element")
-        fi
+    declare -A qb_lookup     # associative array for fast membership test
+    _out=()                  # initialize output array
+
+    # Load all qb_files entries into associative array
+    for item in "${_qb[@]}"; do
+        qb_lookup["$item"]=1
     done
 
-    echo "${non_common_elements[@]}"
+    # Append only entries found in qb_lookup
+    for item in "${_all[@]}"; do
+        if ![[ -z "${qb_lookup[$item]}" ]]; then
+            _out+=("$item")
+        fi
+    done
 }
 
 
-QBITTORRENT_UNMANAGED_FILES=$(find_non_common_elements_associative "${!ALL_FILES[@]}" "${!FILES_EXISTING[@]}")
-QBITTORRENT_UNMANAGED_DIRECTORIES=$(find_non_common_elements_associative "${!ALL_FILES[@]}" "${!ALL_DIRS[@]}")
+QBITTORRENT_UNMANAGED_FILES=$(find_non_common_elements_associative ALL_FILES[@] FILES_EXISTING[@] FILTERED_FILES
+QBITTORRENT_UNMANAGED_DIRECTORIES=$(find_non_common_elements_associative "ALL_FILES[@] ALL_DIRS[@] FILTERED_FILES
 
 output_file_list_filtered_files(){
      for file in "${!QBITTORRENT_UNMANAGED_FILES[@]}"; do printf '%s\n' "$file"; done
