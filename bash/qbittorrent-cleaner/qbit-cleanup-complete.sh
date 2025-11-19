@@ -361,6 +361,8 @@ fi
 
 declare -A FILES_EXISTING=()
 declare -A FILES_MISSING=()
+declare -A QBITTORRENT_UNMANAGED_FILES=()
+declare -A QBITTORRENT_UNMANAGED_DIRECTORIES=()
 
 while IFS= read -r file; do
     if ! [[ -e $file ]]; then
@@ -431,8 +433,8 @@ find_non_common_elements_associative() {
 }
 
 
-QBITTORRENT_UNMANAGED_FILES=$(find_non_common_elements_associative ALL_FILES[@] FILES_EXISTING[@] FILTERED_FILES
-QBITTORRENT_UNMANAGED_DIRECTORIES=$(find_non_common_elements_associative ALL_FILES[@] ALL_DIRS[@] FILTERED_FILES
+QBITTORRENT_UNMANAGED_FILES find_common_elements_associative ALL_FILES[@] FILES_EXISTING[@] QBITTORRENT_UNMANAGED_FILES
+QBITTORRENT_UNMANAGED_DIRECTORIES find_common_elements_associative ALL_FILES[@] ALL_DIRS[@] QBITTORRENT_UNMANAGED_DIRECTORIES
 
 output_file_list_filtered_files(){
      for file in "${!QBITTORRENT_UNMANAGED_FILES[@]}"; do printf '%s\n' "$file"; done
