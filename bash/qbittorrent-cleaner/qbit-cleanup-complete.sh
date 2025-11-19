@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-DEBUG=false
+DEBUG=true
 
 if $DEBUG; then
     set -x
@@ -433,22 +433,31 @@ find_non_common_elements_associative() {
 }
 
 
-QBITTORRENT_UNMANAGED_FILES find_common_elements_associative ALL_FILES[@] FILES_EXISTING[@] QBITTORRENT_UNMANAGED_FILES
-QBITTORRENT_UNMANAGED_DIRECTORIES find_common_elements_associative ALL_FILES[@] ALL_DIRS[@] QBITTORRENT_UNMANAGED_DIRECTORIES
+find_common_elements_associative ALL_FILES[@] FILES_EXISTING[@] QBITTORRENT_UNMANAGED_FILES
+find_common_elements_associative ALL_FILES[@] ALL_DIRS[@] QBITTORRENT_UNMANAGED_DIRECTORIES
 
 output_file_list_filtered_files(){
-     for file in "${!QBITTORRENT_UNMANAGED_FILES[@]}"; do printf '%s\n' "$file"; done
+    for file in "${!QBITTORRENT_UNMANAGED_FILES[@]}"; do printf '%s\n' "$file" 
+         if $DEBUG; then
+            printf '%s\n' "$file" > "$OUTPUT_DIRECTORY"/debug_directory_output.txt
+         fi;
+    done 
+}
 }
 
 output_file_list_filtered_directories(){
-     for file in "${!QBITTORRENT_UNMANAGED_DIRECTORIES[@]}"; do printf '%s\n' "$file"; done
+    for file in "${!QBITTORRENT_UNMANAGED_DIRECTORIES[@]}"; do printf '%s\n' "$file" 
+         if $DEBUG; then
+            printf '%s\n' "$file" > "$OUTPUT_DIRECTORY"/debug_directory_output.txt
+         fi;
+    done 
 }
 
 
 # output result files
 try output_file_list_qbittorrent_existing > "$OUTPUT_DIRECTORY"/"$FILE_LIST_EXISTING_FILENAME"
 try output_file_list_qbittorrent_missing > "$OUTPUT_DIRECTORY"/"$FILE_LIST_MISSING_FILENAME"
-try output_file_list_filtered_files > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_COMPLETE_LIST"
+try output_file_list_filtered_files >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_COMPLETE_LIST"
 try output_file_list_filtered_directories >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_COMPLETE_LIST"
 
 
