@@ -54,6 +54,11 @@ qb_login() {
     local cookie_file="$4"
 
     try curl -s -X POST --data "username=$user&password=$pass" "$url/api/v2/auth/login" -c "$cookie_file" > /dev/null
+
+    if ! grep -q "SID" "$cookie_file" 2>/dev/null; then
+        echo "Failed to log in to qBittorrent at $url"
+        return 1
+    fi
 }
 
 # Function to get list of files from a qBittorrent instance
