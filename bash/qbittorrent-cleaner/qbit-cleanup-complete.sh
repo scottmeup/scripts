@@ -72,10 +72,10 @@ get_qbittorrent_save_paths() {
     # Get torrents info (hash, save_path, content_path)
     local TORRENTS_JSON
     TORRENTS_JSON=$(curl -s --cookie "$cookie_file" "${url}/api/v2/torrents/info")
-     if [[ -z "$cookie_file" ]]; then
-        echo "Failed to log in to qBittorrent at $url" >&2
-        return 1
-    fi
+    #if [[ -z "$cookie_file" ]]; then
+    #    echo "Failed to log in to qBittorrent at $url" >&2
+    #    return 1
+    #fi
 
     # associative arrays for uniqueness
     declare -A SAVE_PATHS=()
