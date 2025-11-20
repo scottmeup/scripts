@@ -56,6 +56,9 @@ qb_login() {
     try curl -s -X POST --data "username=$user&password=$pass" "$url/api/v2/auth/login" -c "$cookie_file" > /dev/null
 
     if ! grep -q "SID" "$cookie_file" 2>/dev/null; then
+        if $DEBUG
+            echo "$cookie_file"
+        fi
         echo "Failed to log in to qBittorrent at $url"
         return 1
     fi
