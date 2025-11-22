@@ -20,7 +20,7 @@ if [[ ! -f "$QB_INSTANCES_FILE" ]]; then
 fi
 
 # Output file location
-OUTPUT_DIRECTORY="/tmp/qb-script"
+OUTPUT_DIRECTORY="$HOME""/git/scripts/bash/qbittorrent-cleaner/output"
 OUTPUT_FILENAME_SAVE_PATHS="qb-save-paths.txt"    # qBittorrent base save paths for existing torrents
 OUTPUT_FILENAME_ALL_FILES="save-path-all-files.txt"    # All files recursively from OUTPUT_FILENAME_SAVE_PATHS
 OUTPUT_FILENAME_ALL_DIRECTORIES="save-path-all-directories.txt"    # All directories recursively from OUTPUT_FILENAME_SAVE_PATHS
@@ -31,8 +31,10 @@ OUTPUT_FILENAME_FILTERED_FILE_LIST="filtered-file-list.txt"    # Final filtered 
 OUTPUT_FILENAME_FILTERED_DIRECTORY_LIST="filtered-directory-list.txt"    # Final filtered list of directories to remove
 OUTPUT_FILENAME_FILTERED_COMPLETE_LIST="filtered-files-and-directories-list.txt"
 OUTPUT_MINIMUM_AGE_DAYS=14    #Minimum age of files to add to output
+COOKIE_FILENAME=
 
 try mkdir -p "$OUTPUT_DIRECTORY"
+try chmod 777 "$OUTPUT_DIRECTORY"
 
 
 #
@@ -55,13 +57,13 @@ qb_login() {
 
     try curl -s -X POST --data "username=$user&password=$pass" "$url/api/v2/auth/login" -c "$cookie_file" > /dev/null
 
-    if ! grep -q "SID" "$cookie_file" 2>/dev/null; then
-        if $DEBUG; then
-            echo "$cookie_file"
-        fi
-        echo "Failed to log in to qBittorrent at $url"
-        return 1
-    fi
+    #if ! grep -q "SID" "$cookie_file" 2>/dev/null; then
+    #    if $DEBUG; then
+    #        echo "$cookie_file"
+    #    fi
+    #    echo "Failed to log in to qBittorrent at $url"
+    #    return 1
+    #fi
 }
 
 # Function to get list of files from a qBittorrent instance
@@ -117,7 +119,7 @@ while IFS=" " read -r url user pass; do
         continue
     fi
 
-    cookie_file="$TEMPDIR"/"(echo "$url" | md5sum | cut -d ' ' -f1)_cookie.txt"
+    cookie_file="$OUTPUT_DIRECTORY"/"(echo "$url" | md5sum | cut -d ' ' -f1)_cookie.txt"
 
     echo "Authenticating with $url..."
     try qb_login "$url" "$user" "$pass" "$cookie_file"
@@ -205,12 +207,12 @@ if $DEBUG; then
     NUMBER_OF_DIRECTORIES=`wc -l "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_DIRECTORIES" | cut -f 1 -d ' '`
     echo "Found $NUMBER_OF_SAVE_PATHS save paths, $NUMBER_OF_FILES files, $NUMBER_OF_DIRECTORIES directories:"
     if [ $NUMBER_OF_FILES -gt 0 ]; then
-        echo "3"
-        sleep 1
-        echo "2"
-        sleep 1
-        echo "1"
-        sleep 1
+        #echo "3"
+        #sleep 1
+        #echo "2"
+        #sleep 1
+        #echo "1"
+        #sleep 1
         cat "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_FILES"  #| more
     fi
 fi
@@ -346,7 +348,7 @@ while IFS=" " read -r url user pass; do
         continue
     fi
 
-    cookie_file="$TEMPDIR"/"(echo "$url" | md5sum | cut -d ' ' -f1)_cookie.txt"
+    cookie_file="$OUTPUT_DIRECTORY"/"(echo "$url" | md5sum | cut -d ' ' -f1)_cookie.txt"
 
     echo "Authenticating with $url..."
     try qb_login "$url" "$user" "$pass" "$cookie_file"
@@ -377,10 +379,10 @@ while IFS= read -r file; do
         if $DEBUG; then
             printf '%s does not exist\n' "$file"
         fi
-        #printf '%s\n' "$file" >> "$OUTPUT_DIRECTORY"/"$FILE_LIST_MISSING_FILENAME"
+        printf '%s\n' "$file" >> "$OUTPUT_DIRECTORY"/"$FILE_LIST_MISSING_FILENAME"
         FILES_MISSING["$file"]=1
         else
-        #printf '%s\n' "$file" >> "$OUTPUT_DIRECTORY"/"$FILE_LIST_EXISTING_FILENAME"
+        printf '%s\n' "$file" >> "$OUTPUT_DIRECTORY"/"$FILE_LIST_EXISTING_FILENAME"
         FILES_EXISTING["$file"]=1
     fi
 done < <(try cat "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB")
@@ -445,18 +447,26 @@ find_common_elements_associative ALL_FILES[@] FILES_EXISTING[@] QBITTORRENT_UNMA
 find_common_elements_associative ALL_FILES[@] ALL_DIRS[@] QBITTORRENT_UNMANAGED_DIRECTORIES
 
 output_file_list_filtered_files(){
+if $DEBUG; then
+    printf "output_file_list_filtered_files()\n"
+    printf "$QBITTORRENT_UNMANAGED_FILES"
+fi;
     for file in "${!QBITTORRENT_UNMANAGED_FILES[@]}"; do printf '%s\n' "$file" 
          if $DEBUG; then
-            printf '%s\n' "$file" > "$OUTPUT_DIRECTORY"/debug_directory_output.txt
+            printf '%s\n' "$file" > "$OUTPUT_DIRECTORY""/debug_file_output.txt"
          fi;
     done 
 }
 
 
 output_file_list_filtered_directories(){
+if $DEBUG; then
+    printf "output_file_list_filtered_directories()\n"
+    printf "$QBITTORRENT_UNMANAGED_DIRECTORIES"
+fi;
     for file in "${!QBITTORRENT_UNMANAGED_DIRECTORIES[@]}"; do printf '%s\n' "$file" 
          if $DEBUG; then
-            printf '%s\n' "$file" > "$OUTPUT_DIRECTORY"/debug_directory_output.txt
+            printf '%s\n' "$file" > "$OUTPUT_DIRECTORY""/debug_directory_output.txt"
          fi;
     done 
 }
@@ -473,19 +483,19 @@ try output_file_list_qbittorrent_missing > "$OUTPUT_DIRECTORY"/"$FILE_LIST_MISSI
 {
     output_file_list_filtered_files
     output_file_list_filtered_directories
-} > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_COMPLETE_LIST"
+} # > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_COMPLETE_LIST"
 
 
 if $DEBUG; then
         NUMBEROFFILES=`wc -l "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB" | cut -f 1 -d ' '`
         echo "Found $NUMBEROFFILES files:"
         if [ $NUMBEROFFILES -gt 0 ]; then
-            echo "3"
-            sleep 1
-            echo "2"
-            sleep 1
-            echo "1"
-            sleep 1
+            #echo "3"
+            #sleep 1
+            #echo "2"
+            #sleep 1
+            #echo "1"
+            #sleep 1
             cat "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB" # | more
         fi
 fi
