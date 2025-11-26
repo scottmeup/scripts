@@ -2,5 +2,4 @@
 /.stfolder
 bash/qbittorrent-cleaner/qb_instances.lst
 *sync-conflict*
-output/*
 /bash/qbittorrent-cleaner/output
