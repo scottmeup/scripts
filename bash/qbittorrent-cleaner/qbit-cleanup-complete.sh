@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 DEBUG=true
+RUN_GET_QBITTORRENT_SAVE_PATHS=true
+RUN_GET_QBITTORRENT_FILES=false
 
 if $DEBUG; then
     set -x
@@ -79,11 +81,7 @@ get_qbittorrent_save_paths() {
 
     # Iterate torrents without creating subshells
     while IFS= read -r TORRENT; do
-        local HASH 
-        local SAVE_PATH 
-        local CONTENT_PATH 
-        local FILES_JSON 
-        local FILE_COUNT
+        local HASH SAVE_PATH CONTENT_PATH FILES_JSON FILE_COUNT
         HASH=$(jq -r '.hash' <<<"$TORRENT")
         SAVE_PATH=$(jq -r '.save_path' <<<"$TORRENT")
 
@@ -217,15 +215,23 @@ while IFS=" " read -r URL USER PASS; do
         continue
     fi
 
-    COOKIE_FILE="$TEMPDIR"/"(echo "$URL" | md5sum | cut -d ' ' -f1)_cookie.txt"
+    COOKIE_FILE="$OUTPUT_DIRECTORY"/"(echo "$URL" | md5sum | cut -d ' ' -f1)_cookie.txt"
 
     echo "Authenticating with $URL..."
     try qb_login "$URL" "$USER" "$PASS" "$COOKIE_FILE"
 
-    echo "Fetching save paths from $URL..."
-    try get_qbittorrent_save_paths "$URL" "$COOKIE_FILE" >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
-    echo "Fetching file list from $URL..."
-    try get_qbittorrent_files "$URL" "$COOKIE_FILE" >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"
+    if $RUN_GET_QBITTORRENT_SAVE_PATHS; then
+    {   
+        echo "Fetching save paths from $URL..."
+        try get_qbittorrent_save_paths "$URL" "$COOKIE_FILE" >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
+    } 
+    fi
+    if $RUN_GET_QBITTORRENT_FILES; then
+    {
+        echo "Fetching file list from $URL..."
+        try get_qbittorrent_files "$URL" "$COOKIE_FILE" >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"
+    }  
+    fi
 done < <(try grep -v "^#\|^$" "$QB_INSTANCES_FILE")
 
 try sort -u "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS" -o "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
@@ -262,7 +268,7 @@ printf "%s\n" "${PRUNED[@]}" > "$TMP_FILE"
 mv "$TMP_FILE" "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
 
 # Get listing of files and directories within search paths
-for dir in "${PRUNED[@]}"; do
+for DIR in "${PRUNED[@]}"; do
     # Check directory exists before trying to list
     if [[ -d "$DIR" ]]; then
         # Use command substitution to capture find output into array

@@ -20,7 +20,7 @@ if [[ ! -f "$QB_INSTANCES_FILE" ]]; then
 fi
 
 # Output file location
-OUTPUT_DIRECTORY="/tmp/qb-script"
+OUTPUT_DIRECTORY="./output"
 OUTPUT_FILENAME_SAVE_PATHS="qb-save-paths.txt"
 OUTPUT_FILENAME_ALL_FILES="save-path-all-files.txt"
 OUTPUT_FILENAME_ALL_DIRECTORIES="save-path-all-directories.txt"
@@ -87,7 +87,7 @@ get_qbittorrent_save_paths() {
         for sp in "${!SAVE_PATHS[@]}"; do printf '%s\n' "$sp"; done
     }
 }
-# END get_qbittorrent_files()
+# END get_qbittorrent_save_paths()
 
 echo "Processing qBittorrent instances..."
 try > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"  # clear the output file
