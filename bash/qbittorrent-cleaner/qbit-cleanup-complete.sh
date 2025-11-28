@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-DEBUG=false
+DEBUG=true
 
 if $DEBUG; then
     set -x
@@ -35,6 +35,13 @@ OUTPUT_MINIMUM_AGE_DAYS=14    #Minimum age of files to add to output
 try mkdir -p "$OUTPUT_DIRECTORY"
 
 
+# associative arrays for uniqueness
+declare -A SAVE_PATHS=()
+declare -A ALL_FILES=()
+declare -A ALL_DIRS=()
+declare -A ALL_DIRECTORIES=()
+declare -A PRUNED=()
+
 OUTPUT_MINIMUM_AGE_MINUTES=$(( OUTPUT_MINIMUM_AGE_DAYS*60*24 ))
 
 if $DEBUG; then
@@ -66,18 +73,17 @@ get_qbittorrent_save_paths() {
         return 1
     fi
 
-    # associative arrays for uniqueness
-    declare -A SAVE_PATHS=()
-    declare -A ALL_FILES=()
-    declare -A ALL_DIRS=()
-
     # Get torrents info JSON
     local TORRENTS_JSON
     TORRENTS_JSON=$(curl -s --cookie "$COOKIE_FILE" "${URL%/}/api/v2/torrents/info" || echo "[]")
 
     # Iterate torrents without creating subshells
     while IFS= read -r TORRENT; do
-        local HASH SAVE_PATH CONTENT_PATH FILES_JSON FILE_COUNT
+        local HASH 
+        local SAVE_PATH 
+        local CONTENT_PATH 
+        local FILES_JSON 
+        local FILE_COUNT
         HASH=$(jq -r '.hash' <<<"$TORRENT")
         SAVE_PATH=$(jq -r '.save_path' <<<"$TORRENT")
 
@@ -109,11 +115,6 @@ get_qbittorrent_files() {
         echo "Failed to log in to qBittorrent at $URL" >&2
         return 1
     fi
-
-    # associative arrays for uniqueness
-    declare -A SAVE_PATHS=()
-    declare -A ALL_FILES=()
-    declare -A ALL_DIRS=()
 
     # Get torrents info JSON
     local TORRENTS_JSON
@@ -158,10 +159,7 @@ get_qbittorrent_files() {
             for REL_NAME in "${RELS[@]}"; do
                 # remove any leading slash from REL_NAME and join
                 REL_NAME="${REL_NAME#/}"
-                #
-                # Pretty sure bug is here: CONTENT_PATH and REL_NAME both contain the base folder of the data
-                #
-                #local FULL="${CONTENT_PATH}/${REL_NAME}"
+
                 local FULL="${SAVE_PATH}/${REL_NAME}"
                 FULL="${FULL//\/\//\/}"
                 ALL_FILES["$FULL"]=1
@@ -207,10 +205,13 @@ get_qbittorrent_files() {
 }
 # END get_qbittorrent_files()
 
+
+
+
 echo "Processing qBittorrent instances..."
 try > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"  # clear the output file
 
-# Read qBittorrent instances from the file
+# Read qBittorrent instances from the file, retrieve data from qBittorrent instances
 while IFS=" " read -r URL USER PASS; do
     if [[ -z "$URL" || -z "$USER" || -z "$PASS" ]]; then
         continue
@@ -223,9 +224,14 @@ while IFS=" " read -r URL USER PASS; do
 
     echo "Fetching save paths from $URL..."
     try get_qbittorrent_save_paths "$URL" "$COOKIE_FILE" >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
+    echo "Fetching file list from $URL..."
+    try get_qbittorrent_files "$URL" "$COOKIE_FILE" >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"
 done < <(try grep -v "^#\|^$" "$QB_INSTANCES_FILE")
 
 try sort -u "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS" -o "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
+
+
+
 
 # Prune the directory list
 
@@ -235,8 +241,6 @@ TMP_FILE="$(mktemp)"
 # Read and sort directories
 mapfile -t DIRS < "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
 IFS=$'\n' DIRS=($(printf "%s\n" "${DIRS[@]}" | sort))
-
-PRUNED=()
 
 for DIR in "${DIRS[@]}"; do
     SKIP=false
@@ -258,9 +262,6 @@ printf "%s\n" "${PRUNED[@]}" > "$TMP_FILE"
 mv "$TMP_FILE" "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
 
 # Get listing of files and directories within search paths
-ALL_FILES=()
-ALL_DIRECTORIES=()
-
 for dir in "${PRUNED[@]}"; do
     # Check directory exists before trying to list
     if [[ -d "$DIR" ]]; then
@@ -268,8 +269,8 @@ for dir in "${PRUNED[@]}"; do
         while IFS= read -r file; do
             ALL_FILES+=("$file")
         done < <(find "$DIR" -type f -mmin +$OUTPUT_MINIMUM_AGE_MINUTES 2>/dev/null)
-        while IFS= read -r directory; do
-            ALL_DIRECTORIES+=("$DIRectory")
+        while IFS= read -r DIRECTORY; do
+            ALL_DIRECTORIES+=("$DIRECTORY")
         done < <(find "$DIR" -type d -mmin +$OUTPUT_MINIMUM_AGE_MINUTES 2>/dev/null)
     else
         echo "Warning: '$DIR' is not a valid directory" >&2
