@@ -5,6 +5,7 @@ RUN_GET_QBITTORRENT_SAVE_PATHS=true
 RUN_GET_QBITTORRENT_FILES=false
 
 if $DEBUG; then
+    clear
     set -x
 fi
 
@@ -38,7 +39,7 @@ try mkdir -p "$OUTPUT_DIRECTORY"
 
 
 # associative arrays for uniqueness
-declare -A SAVE_PATHS=()
+declare -A SAVE_PATHS=()    # Base save directories for qBittorrent Categories
 declare -A ALL_FILES=()
 declare -A ALL_DIRS=()
 declare -A ALL_DIRECTORIES=()
@@ -245,8 +246,20 @@ try sort -u "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS" -o "$OUTPUT_DIRECT
 TMP_FILE="$(mktemp)"
 
 # Read and sort directories
-mapfile -t DIRS < "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
-IFS=$'\n' DIRS=($(printf "%s\n" "${DIRS[@]}" | sort))
+#
+# to do: Remove file usage here
+#
+
+#mapfile -t DIRS < "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
+#IFS=$'\n' DIRS=($(printf "%s\n" "${DIRS[@]}" | sort))
+#mapfile -t -d '' DIRS  < <(printf '%s\0' "${SAVE_PATHS[@]}" | sort -z)
+
+if $DEBUG; then
+    for D in "${!SAVE_PATHS[@]}"; do printf '%s\n' "$D"; done
+    printf '%s\n' "${!SAVE_PATHS[@]}"
+    echo "*********"
+    echo "$DIRS"
+fi
 
 for DIR in "${DIRS[@]}"; do
     SKIP=false
@@ -272,8 +285,8 @@ for DIR in "${PRUNED[@]}"; do
     # Check directory exists before trying to list
     if [[ -d "$DIR" ]]; then
         # Use command substitution to capture find output into array
-        while IFS= read -r file; do
-            ALL_FILES+=("$file")
+        while IFS= read -r FILE; do
+            ALL_FILES+=("$FILE")
         done < <(find "$DIR" -type f -mmin +$OUTPUT_MINIMUM_AGE_MINUTES 2>/dev/null)
         while IFS= read -r DIRECTORY; do
             ALL_DIRECTORIES+=("$DIRECTORY")
