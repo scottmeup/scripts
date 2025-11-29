@@ -259,7 +259,7 @@ if $DEBUG; then
     for S_P in "${!SAVE_PATHS[@]}"; do printf '%s\n' "$S_P"; done
     printf '%s\n' "${!SAVE_PATHS[@]}"
     echo "*********"
-    for D in "${!DIRS[@]}"; do printf '%s\n' "$D"; done
+    for D in "${DIRS[@]}"; do printf '%s\n' "$D"; done
 
 fi
 
