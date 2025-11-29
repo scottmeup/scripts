@@ -5,6 +5,7 @@ RUN_GET_QBITTORRENT_SAVE_PATHS=true
 RUN_GET_QBITTORRENT_FILES=false
 
 if $DEBUG; then
+    export PS4='+(${BASH_SOURCE}:${LINENO}): ${FUNCNAME[0]:+${FUNCNAME[0]}(): }'
     clear
     set -x
 fi
@@ -116,8 +117,8 @@ get_qbittorrent_files() {
     fi
 
     # Get torrents info JSON
-    local TORRENTS_JSON
-    TORRENTS_JSON=$(curl -s --cookie "$COOKIE_FILE" "${URL%/}/api/v2/torrents/info" || echo "[]")
+    #local TORRENTS_JSON
+    #TORRENTS_JSON=$(curl -s --cookie "$COOKIE_FILE" "${URL%/}/api/v2/torrents/info" || echo "[]")
 
     # Iterate torrents without creating subshells
     while IFS= read -r TORRENT; do
@@ -252,13 +253,14 @@ TMP_FILE="$(mktemp)"
 
 #mapfile -t DIRS < "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
 #IFS=$'\n' DIRS=($(printf "%s\n" "${DIRS[@]}" | sort))
-#mapfile -t -d '' DIRS  < <(printf '%s\0' "${SAVE_PATHS[@]}" | sort -z)
+mapfile -t -d '' DIRS  < <(printf '%s\0' "${!SAVE_PATHS[@]}" | sort -z)
 
 if $DEBUG; then
-    for D in "${!SAVE_PATHS[@]}"; do printf '%s\n' "$D"; done
+    for S_P in "${!SAVE_PATHS[@]}"; do printf '%s\n' "$S_P"; done
     printf '%s\n' "${!SAVE_PATHS[@]}"
     echo "*********"
-    echo "$DIRS"
+    for D in "${!DIRS[@]}"; do printf '%s\n' "$D"; done
+
 fi
 
 for DIR in "${DIRS[@]}"; do
