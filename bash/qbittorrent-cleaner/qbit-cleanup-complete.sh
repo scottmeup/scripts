@@ -206,6 +206,55 @@ get_qbittorrent_files() {
 # END get_qbittorrent_files()
 
 
+prune_save_paths()
+{
+    # Prune the directory list to remove nested folders
+
+
+    #mapfile -t DIRS < "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
+    #IFS=$'\n' DIRS=($(printf "%s\n" "${DIRS[@]}" | sort))
+    mapfile -t -d '' DIRS  < <(printf '%s\0' "${!SAVE_PATHS[@]}" | sort -z)
+
+    if $DEBUG; then
+        for S_P in "${!SAVE_PATHS[@]}"; do printf '%s\n' "$S_P"; done
+        printf '%s\n' "${!SAVE_PATHS[@]}"
+        echo "*********"
+        for D in "${DIRS[@]}"; do printf '%s\n' "$D"; done
+
+    fi
+
+    for DIR in "${DIRS[@]}"; do
+        SKIP=false
+        for KEPT in "${PRUNED[@]}"; do
+            if [[ "$DIR" == "$KEPT/"* ]]; then
+                SKIP=true
+                break
+            fi
+        done
+        if ! $SKIP; then
+            PRUNED+=("$DIR")
+        fi
+    done
+}
+
+
+get_save_path_file_and_directory_contents(){
+    # Get listing of files and directories within search paths
+    for DIR in "${PRUNED[@]}"; do
+        # Check directory exists before trying to list
+        if [[ -d "$DIR" ]]; then
+            # Use command substitution to capture find output into array
+            while IFS= read -r FILE; do
+                ALL_FILES+=("$FILE")
+            done < <(find "$DIR" -type f -mmin +$OUTPUT_MINIMUM_AGE_MINUTES 2>/dev/null)
+            while IFS= read -r DIRECTORY; do
+                ALL_DIRECTORIES+=("$DIRECTORY")
+            done < <(find "$DIR" -type d -mmin +$OUTPUT_MINIMUM_AGE_MINUTES 2>/dev/null)
+        else
+            echo "Warning: '$DIR' is not a valid directory" >&2
+        fi
+    done
+}
 
 
 echo "Processing qBittorrent instances..."
@@ -236,67 +285,23 @@ while IFS=" " read -r URL USER PASS; do
     fi
 done < <(try grep -v "^#\|^$" "$QB_INSTANCES_FILE")
 
-try sort -u "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS" -o "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
+#try sort -u "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS" -o "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
 
 
+prune_save_paths
 
-
-# Prune the directory list
-
-# Use a temporary file for safe overwrite
-TMP_FILE="$(mktemp)"
-
-# Read and sort directories
-#
-# to do: Remove file usage here
-#
-
-#mapfile -t DIRS < "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
-#IFS=$'\n' DIRS=($(printf "%s\n" "${DIRS[@]}" | sort))
-mapfile -t -d '' DIRS  < <(printf '%s\0' "${!SAVE_PATHS[@]}" | sort -z)
-
-if $DEBUG; then
-    for S_P in "${!SAVE_PATHS[@]}"; do printf '%s\n' "$S_P"; done
-    printf '%s\n' "${!SAVE_PATHS[@]}"
-    echo "*********"
-    for D in "${DIRS[@]}"; do printf '%s\n' "$D"; done
-
-fi
-
-for DIR in "${DIRS[@]}"; do
-    SKIP=false
-    for KEPT in "${PRUNED[@]}"; do
-        if [[ "$DIR" == "$KEPT/"* ]]; then
-            SKIP=true
-            break
-        fi
-    done
-    if ! $SKIP; then
-        PRUNED+=("$DIR")
-    fi
-done
+get_save_path_file_and_directory_contents
 
 # Write pruned directory list to temporary file
+TMP_FILE="$(mktemp)"
+
 printf "%s\n" "${PRUNED[@]}" > "$TMP_FILE"
+
 
 # Replace the original file
 mv "$TMP_FILE" "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
 
-# Get listing of files and directories within search paths
-for DIR in "${PRUNED[@]}"; do
-    # Check directory exists before trying to list
-    if [[ -d "$DIR" ]]; then
-        # Use command substitution to capture find output into array
-        while IFS= read -r FILE; do
-            ALL_FILES+=("$FILE")
-        done < <(find "$DIR" -type f -mmin +$OUTPUT_MINIMUM_AGE_MINUTES 2>/dev/null)
-        while IFS= read -r DIRECTORY; do
-            ALL_DIRECTORIES+=("$DIRECTORY")
-        done < <(find "$DIR" -type d -mmin +$OUTPUT_MINIMUM_AGE_MINUTES 2>/dev/null)
-    else
-        echo "Warning: '$DIR' is not a valid directory" >&2
-    fi
-done
+
 
 
 # Sort directories from deepest to shallowest
