@@ -4,6 +4,8 @@ DEBUG=true
 RUN_GET_QBITTORRENT_SAVE_PATHS=true
 RUN_GET_QBITTORRENT_FILES=false
 
+IFS_ORIGINAL=$IFS
+
 if $DEBUG; then
     export PS4='+(${BASH_SOURCE}:${LINENO}): ${FUNCNAME[0]:+${FUNCNAME[0]}(): }'
     clear
@@ -38,12 +40,16 @@ OUTPUT_MINIMUM_AGE_DAYS=14    #Minimum age of files to add to output
 
 try mkdir -p "$OUTPUT_DIRECTORY"
 
-
+ALL_DIRECTORIES_SORTED=()
+ALL_FILES=()    # All regular files in the file system, recursively from qBittorrent save paths
+ALL_DIRECTORIES=()   # All directories in the file system, recursively from qBittorrent save paths
+QBIT_MANAGED_FILES=()
+QBIT_MANAGED_DIRECTORIES=()
+UNMANAGED_FILES=()    # Regular files found in save paths recursively that are not currently managed by qBittorrent
+UNMANAGED_DIRECTORIES=()    # Directories found in save paths recursively that are not currently managed by qBittorrent
 # associative arrays for uniqueness
 declare -A SAVE_PATHS=()    # Base save directories for qBittorrent Categories
-declare -A ALL_FILES=()
-declare -A ALL_DIRS=()
-declare -A ALL_DIRECTORIES=()
+declare -A ALL_SAVE_PATHS=()    
 declare -A PRUNED=()
 
 OUTPUT_MINIMUM_AGE_MINUTES=$(( OUTPUT_MINIMUM_AGE_DAYS*60*24 ))
@@ -52,7 +58,6 @@ if $DEBUG; then
     echo "Minimum Age is $OUTPUT_MINIMUM_AGE_MINUTES minutes" >> "$OUTPUT_DIRECTORY"/minimum-age.txt
 fi
 
-try mkdir -p "$OUTPUT_DIRECTORY"
 
 # Function to authenticate with qBittorrent and get session cookie
 qb_login() {
@@ -105,6 +110,10 @@ get_qbittorrent_save_paths() {
 
 get_qbittorrent_files() {
     # Function to get list of files from a qBittorrent instance
+    # Output populates ALL_FILES ALL_SAVE_PATHS
+    #
+    # To do: confirm the above are being populated correctly
+    #
     local URL="$1"
     local COOKIE_FILE="$2"
 
@@ -191,25 +200,25 @@ get_qbittorrent_files() {
         local DIR_PATH
         DIR_PATH=$(dirname "$FILE_PATH")
         while [[ -n "$DIR_PATH" && "$DIR_PATH" != "/" && "$DIR_PATH" != "$MATCHING_SAVE" ]]; do
-            ALL_DIRS["${DIR_PATH%/}/"]=1
+            ALL_SAVE_PATHS["${DIR_PATH%/}/"]=1
             DIR_PATH=$(dirname "$DIR_PATH")
         done
     done
 
     # Output: save_paths, directories, files (unique)
-    {
-        for S_P in "${!SAVE_PATHS[@]}"; do printf '%s\n' "$S_P"; done
-        for D in "${!ALL_DIRS[@]}"; do printf '%s\n' "$D"; done
-        for F in "${!ALL_FILES[@]}"; do printf '%s\n' "$F"; done
-    }
+    #{
+        #for S_P in "${!SAVE_PATHS[@]}"; do printf '%s\n' "$S_P"; done
+        #for D in "${!ALL_SAVE_PATHS[@]}"; do printf '%s\n' "$D"; done
+        #for F in "${!ALL_FILES[@]}"; do printf '%s\n' "$F"; done
+    #}
 }
 # END get_qbittorrent_files()
 
 
 prune_save_paths()
 {
-    # Prune the directory list to remove nested folders
-
+    # Prune the directory list to remove nested subfolders
+    # Outputs to PRUNED
 
     #mapfile -t DIRS < "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
     #IFS=$'\n' DIRS=($(printf "%s\n" "${DIRS[@]}" | sort))
@@ -240,6 +249,8 @@ prune_save_paths()
 
 get_save_path_file_and_directory_contents(){
     # Get listing of files and directories within search paths
+    # Outputs to ALL_FILES and ALL_DIRECTORIES
+
     for DIR in "${PRUNED[@]}"; do
         # Check directory exists before trying to list
         if [[ -d "$DIR" ]]; then
@@ -252,6 +263,46 @@ get_save_path_file_and_directory_contents(){
             done < <(find "$DIR" -type d -mmin +$OUTPUT_MINIMUM_AGE_MINUTES 2>/dev/null)
         else
             echo "Warning: '$DIR' is not a valid directory" >&2
+        fi
+    done
+}
+
+sort_directories_by_depth_descending(){
+    # Sort directories from deepest to shallowest
+    # Output stored in ALL_DIRECTORIES_SORTED
+    TMP=()
+
+    for DIR in "${ALL_DIRECTORIES[@]}"; do
+        DEPTH=$(grep -o "/" <<< "$DIR" | wc -l)
+        TMP+=("$DEPTH:$DIR")
+    done
+
+    # Sort numerically by depth (descending)
+    SORTED_TMP=$(printf "%s\n" "${TMP[@]}" | sort -t: -k1,1nr)
+
+    # Extract the directory names back into an array
+    while IFS= read -r LINE; do
+        ALL_DIRECTORIES_SORTED+=("${LINE#*:}")
+    done <<< "$SORTED_TMP"
+}
+
+filter_qbittorrent_managed_files(){
+    local -n FILE_SYSTEM="$1"       # nameref to input array 1 - list of file system entries that exist in the qBittorrent save path recursively
+    local -n QBITTORRENT_MANAGED_FILE="$2"        # nameref to input array 2 - list of files actively being managed by qBittorrent
+    local -n UNMANAGED_FILE_SYSTEM_ENTRY="$3"       # nameref to output array - output list containing file system entries that are not actively managed by qbittorrent
+
+    declare -A qb_lookup     # associative array for fast membership test
+    UNMANAGED_FILE_SYSTEM_ENTRY=()                  # initialize output array
+
+    # Load all qb_files entries into associative array
+    for item in "${QBITTORRENT_MANAGED_FILE[@]}"; do
+        qb_lookup["$item"]=1
+    done
+
+    # Append only entries NOT found in qb_lookup
+    for item in "${FILE_SYSTEM[@]}"; do
+        if [[ -z "${qb_lookup[$item]}" ]]; then
+            UNMANAGED_FILE_SYSTEM_ENTRY+=("$item")
         fi
     done
 }
@@ -274,13 +325,15 @@ while IFS=" " read -r URL USER PASS; do
     if $RUN_GET_QBITTORRENT_SAVE_PATHS; then
     {   
         echo "Fetching save paths from $URL..."
-        try get_qbittorrent_save_paths "$URL" "$COOKIE_FILE" >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
+        try get_qbittorrent_save_paths "$URL" "$COOKIE_FILE" #>> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
+        # Output populates ALL_SAVE_PATHS
     } 
     fi
     if $RUN_GET_QBITTORRENT_FILES; then
     {
         echo "Fetching file list from $URL..."
-        try get_qbittorrent_files "$URL" "$COOKIE_FILE" >> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"
+        try get_qbittorrent_files "$URL" "$COOKIE_FILE" #>> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"
+        # Outut populates ALL_FILES
     }  
     fi
 done < <(try grep -v "^#\|^$" "$QB_INSTANCES_FILE")
@@ -288,39 +341,41 @@ done < <(try grep -v "^#\|^$" "$QB_INSTANCES_FILE")
 #try sort -u "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS" -o "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
 
 
-prune_save_paths
+try prune_save_paths
+# Input takes SAVE_PATHS
+# Output populates PRUNED
 
-get_save_path_file_and_directory_contents
+try get_save_path_file_and_directory_contents
+# Input takes PRUNED
+# Output populates ALL_FILES and ALL_DIRECTORIES
+
+try sort_directories_by_depth_descending
+# Input takes ALL_DIRECTORIES
+# Output populates ALL_DIRECTORIES_SORTED
+
+try filter_qbittorrent_managed_files ALL_FILES[@] 
+# Required arguments are:
+# Input: File system listing array, qBittorrent managed files listing array, 
+# Output: Filtered file system array that does not contain files currently managed by qBittorrent
+
+try filter_qbittorrent_managed_files(){
+
+}
 
 # Write pruned directory list to temporary file
-TMP_FILE="$(mktemp)"
+#TMP_FILE="$(mktemp)"
 
-printf "%s\n" "${PRUNED[@]}" > "$TMP_FILE"
+#printf "%s\n" "${PRUNED[@]}" > "$TMP_FILE"
 
 
 # Replace the original file
-mv "$TMP_FILE" "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
+#mv "$TMP_FILE" "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
 
 
 
 
-# Sort directories from deepest to shallowest
-TMP=()
 
-for DIR in "${ALL_DIRECTORIES[@]}"; do
-    DEPTH=$(grep -o "/" <<< "$DIR" | wc -l)
-    TMP+=("$DEPTH:$DIR")
-done
-
-# Sort numerically by depth (descending)
-SORTED_TMP=$(printf "%s\n" "${TMP[@]}" | sort -t: -k1,1nr)
-
-# Extract the directory names back into an array
-SORTED_DIRECTORIES=()
-while IFS= read -r LINE; do
-    SORTED_DIRECTORIES+=("${LINE#*:}")
-done <<< "$SORTED_TMP"
 
 printf "%s\n" "${ALL_FILES[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_FILES"
 #printf "%s\n" "${ALL_DIRECTORIES[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_DIRECTORIES"
-printf "%s\n" "${SORTED_DIRECTORIES[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_DIRECTORIES"
+printf "%s\n" "${ALL_DIRECTORIES_SORTED[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_DIRECTORIES"
