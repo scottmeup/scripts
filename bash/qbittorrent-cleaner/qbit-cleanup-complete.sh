@@ -2,7 +2,7 @@
 
 DEBUG=true
 RUN_GET_QBITTORRENT_SAVE_PATHS=true
-RUN_GET_QBITTORRENT_FILES=false
+RUN_GET_QBITTORRENT_FILES=true
 
 IFS_ORIGINAL=$IFS
 
@@ -28,7 +28,7 @@ fi
 # Output file location
 OUTPUT_DIRECTORY="./output"
 OUTPUT_FILENAME_SAVE_PATHS="qb-save-paths.txt"    # qBittorrent base save paths for existing torrents
-OUTPUT_FILENAME_ALL_FILES="save-path-all-files.txt"    # All files recursively from OUTPUT_FILENAME_SAVE_PATHS
+OUTPUT_FILENAME_FILE_SYSTEM_ALL_FILES="save-path-all-files.txt"    # All files recursively from OUTPUT_FILENAME_SAVE_PATHS
 OUTPUT_FILENAME_ALL_DIRECTORIES="save-path-all-directories.txt"    # All directories recursively from OUTPUT_FILENAME_SAVE_PATHS
 OUTPUT_FILENAME_QB="qb-files.txt"    # List of files in qBittorrent's database of currently managed files
 FILE_LIST_MISSING_FILENAME="qb-files-missing.txt"    # OUTPUT_FILENAME_QB files that do not exist in the file system 
@@ -41,7 +41,7 @@ OUTPUT_MINIMUM_AGE_DAYS=14    #Minimum age of files to add to output
 try mkdir -p "$OUTPUT_DIRECTORY"
 
 ALL_DIRECTORIES_SORTED=()
-ALL_FILES=()    # All regular files in the file system, recursively from qBittorrent save paths
+FILE_SYSTEM_ALL_FILES=()    # All regular files in the file system, recursively from qBittorrent save paths
 ALL_DIRECTORIES=()   # All directories in the file system, recursively from qBittorrent save paths
 QBIT_MANAGED_FILES=()
 QBIT_MANAGED_DIRECTORIES=()
@@ -49,7 +49,7 @@ UNMANAGED_FILES=()    # Regular files found in save paths recursively that are n
 UNMANAGED_DIRECTORIES=()    # Directories found in save paths recursively that are not currently managed by qBittorrent
 # associative arrays for uniqueness
 declare -A SAVE_PATHS=()    # Base save directories for qBittorrent Categories
-declare -A ALL_SAVE_PATHS=()    
+declare -A QBIT_ALL_SAVE_PATHS=()    
 declare -A PRUNED=()
 
 OUTPUT_MINIMUM_AGE_MINUTES=$(( OUTPUT_MINIMUM_AGE_DAYS*60*24 ))
@@ -110,7 +110,7 @@ get_qbittorrent_save_paths() {
 
 get_qbittorrent_files() {
     # Function to get list of files from a qBittorrent instance
-    # Output populates ALL_FILES ALL_SAVE_PATHS
+    # Output populates FILE_SYSTEM_ALL_FILES QBIT_ALL_SAVE_PATHS
     #
     # To do: confirm the above are being populated correctly
     #
@@ -151,7 +151,7 @@ get_qbittorrent_files() {
         if [[ "$FILE_COUNT" -le 1 ]]; then
             # single-file torrent: content_path should be full file path
             if [[ -n "$CONTENT_PATH" && "$CONTENT_PATH" != "null" ]]; then
-                ALL_FILES["$CONTENT_PATH"]=1
+                FILE_SYSTEM_ALL_FILES["$CONTENT_PATH"]=1
             else
                 # fallback: use files[0].name appended to save_path
                 local SINGLE_NAME
@@ -159,7 +159,7 @@ get_qbittorrent_files() {
                 if [[ -n "$SINGLE_NAME" ]]; then
                     local FULL="${SAVE_PATH}/${SINGLE_NAME}"
                     FULL="${FULL//\/\//\/}"
-                    ALL_FILES["$FULL"]=1
+                    QBIT_MANAGED_FILES["$FULL"]=1
                 fi
             fi
         else
@@ -171,13 +171,13 @@ get_qbittorrent_files() {
 
                 local FULL="${SAVE_PATH}/${REL_NAME}"
                 FULL="${FULL//\/\//\/}"
-                ALL_FILES["$FULL"]=1
+                QBIT_MANAGED_FILES["$FULL"]=1
             done
         fi
     done < <(jq -c '.[]' <<<"$TORRENTS_JSON")
 
     # Build parent directories up to but NOT including the matching save_path
-    for FILE_PATH in "${!ALL_FILES[@]}"; do
+    for FILE_PATH in "${!FILE_SYSTEM_ALL_FILES[@]}"; do
         # normalize
         FILE_PATH="${FILE_PATH%/}"
 
@@ -200,7 +200,7 @@ get_qbittorrent_files() {
         local DIR_PATH
         DIR_PATH=$(dirname "$FILE_PATH")
         while [[ -n "$DIR_PATH" && "$DIR_PATH" != "/" && "$DIR_PATH" != "$MATCHING_SAVE" ]]; do
-            ALL_SAVE_PATHS["${DIR_PATH%/}/"]=1
+            QBIT_ALL_SAVE_PATHS["${DIR_PATH%/}/"]=1
             DIR_PATH=$(dirname "$DIR_PATH")
         done
     done
@@ -208,8 +208,8 @@ get_qbittorrent_files() {
     # Output: save_paths, directories, files (unique)
     #{
         #for S_P in "${!SAVE_PATHS[@]}"; do printf '%s\n' "$S_P"; done
-        #for D in "${!ALL_SAVE_PATHS[@]}"; do printf '%s\n' "$D"; done
-        #for F in "${!ALL_FILES[@]}"; do printf '%s\n' "$F"; done
+        #for D in "${!QBIT_ALL_SAVE_PATHS[@]}"; do printf '%s\n' "$D"; done
+        #for F in "${!FILE_SYSTEM_ALL_FILES[@]}"; do printf '%s\n' "$F"; done
     #}
 }
 # END get_qbittorrent_files()
@@ -249,14 +249,14 @@ prune_save_paths()
 
 get_save_path_file_and_directory_contents(){
     # Get listing of files and directories within search paths
-    # Outputs to ALL_FILES and ALL_DIRECTORIES
+    # Outputs to FILE_SYSTEM_ALL_FILES and ALL_DIRECTORIES
 
     for DIR in "${PRUNED[@]}"; do
         # Check directory exists before trying to list
         if [[ -d "$DIR" ]]; then
             # Use command substitution to capture find output into array
             while IFS= read -r FILE; do
-                ALL_FILES+=("$FILE")
+                FILE_SYSTEM_ALL_FILES+=("$FILE")
             done < <(find "$DIR" -type f -mmin +$OUTPUT_MINIMUM_AGE_MINUTES 2>/dev/null)
             while IFS= read -r DIRECTORY; do
                 ALL_DIRECTORIES+=("$DIRECTORY")
@@ -326,14 +326,14 @@ while IFS=" " read -r URL USER PASS; do
     {   
         echo "Fetching save paths from $URL..."
         try get_qbittorrent_save_paths "$URL" "$COOKIE_FILE" #>> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_SAVE_PATHS"
-        # Output populates ALL_SAVE_PATHS
+        # Output populates QBIT_ALL_SAVE_PATHS
     } 
     fi
     if $RUN_GET_QBITTORRENT_FILES; then
     {
         echo "Fetching file list from $URL..."
         try get_qbittorrent_files "$URL" "$COOKIE_FILE" #>> "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_QB"
-        # Outut populates ALL_FILES
+        # Outut populates FILE_SYSTEM_ALL_FILES
     }  
     fi
 done < <(try grep -v "^#\|^$" "$QB_INSTANCES_FILE")
@@ -347,20 +347,24 @@ try prune_save_paths
 
 try get_save_path_file_and_directory_contents
 # Input takes PRUNED
-# Output populates ALL_FILES and ALL_DIRECTORIES
+# Output populates FILE_SYSTEM_ALL_FILES and ALL_DIRECTORIES
 
 try sort_directories_by_depth_descending
 # Input takes ALL_DIRECTORIES
 # Output populates ALL_DIRECTORIES_SORTED
 
-try filter_qbittorrent_managed_files ALL_FILES[@] 
+try filter_qbittorrent_managed_files FILE_SYSTEM_ALL_FILES[@] QBIT_MANAGED_FILES[@] UNMANAGED_DIRECTORIES
 # Required arguments are:
 # Input: File system listing array, qBittorrent managed files listing array, 
 # Output: Filtered file system array that does not contain files currently managed by qBittorrent
 
-try filter_qbittorrent_managed_files(){
+try filter_qbittorrent_managed_files ALL_DIRECTORIES_SORTED[@] QBIT_MANAGED_FILES[@] UNMANAGED_DIRECTORIES
+# Required arguments are:
+# Input: Sorted Directory array, qBittorrent managed files listing array, 
+# Output: Filtered file system array that does not contain files currently managed by qBittorrent
 
-}
+printf "%s\n" "${UNMANAGED_FILES[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_FILE_LIST"
+printf "%s\n" "${UNMANAGED_DIRECTORIES[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILTERED_DIRECTORY_LIST"
 
 # Write pruned directory list to temporary file
 #TMP_FILE="$(mktemp)"
@@ -376,6 +380,6 @@ try filter_qbittorrent_managed_files(){
 
 
 
-printf "%s\n" "${ALL_FILES[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_FILES"
+#printf "%s\n" "${FILE_SYSTEM_ALL_FILES[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_FILE_SYSTEM_ALL_FILES"
 #printf "%s\n" "${ALL_DIRECTORIES[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_DIRECTORIES"
-printf "%s\n" "${ALL_DIRECTORIES_SORTED[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_DIRECTORIES"
+#printf "%s\n" "${ALL_DIRECTORIES_SORTED[@]}" > "$OUTPUT_DIRECTORY"/"$OUTPUT_FILENAME_ALL_DIRECTORIES"
