@@ -27,7 +27,7 @@ declare -a UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS=()
 
 # Config
 QB_INSTANCES_FILE="qb_instances.lst"
-OUTPUT_DIRECTORY="./output"
+OUTPUT_DIRECTORY="/tmp/qbittorrent-cleanup"
 OUTPUT_MINIMUM_AGE_DAYS=14
 OUTPUT_MINIMUM_AGE_MINUTES=$(( OUTPUT_MINIMUM_AGE_DAYS * 1440 ))
 
@@ -214,6 +214,10 @@ dump_all_arrays_to_files() {
 
 
 delete_unmanaged_content() {
+    # delete_unmanaged_content false = dry run
+    # delete_unmanaged_content true = delete interactively
+    # delete_unmanaged_content true true = delete without interaction. use with caution.
+
     local DRY_RUN="${1:-true}"          # pass "false" to actually delete
     local CONFIRM="${2:-true}"          # set to false to skip interactive prompt
     local LOG_FILE="$OUTPUT_DIRECTORY/deletion_$(date +%Y%m%d_%H%M%S).log"

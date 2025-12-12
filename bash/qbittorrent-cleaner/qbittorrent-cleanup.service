@@ -1,0 +1,21 @@
+[Unit]
+Description=qBittorrent Unmanaged Files & Folders Cleanup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=andrewscott                
+WorkingDirectory=/opt/script   # ← folder where the script lives
+ExecStart=/usr/bin/env bash /opt/script/qbit-cleanup-complete.sh
+StandardOutput=journal
+StandardError=journal
+
+# Security hardening
+ProtectSystem=strict
+ProtectHome=no                   # we need to read/write in home
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

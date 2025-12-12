@@ -1,0 +1,13 @@
+[Unit]
+Description=Daily qBittorrent Unmanaged Content Cleanup
+Requires=qbittorrent-cleanup.service
+
+[Timer]
+# Run every day at 03:30 AM
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=15m     # adds up to 15 min random delay (prevents thundering herd)
+Persistent=true            # runs missed jobs after reboot
+AccuracySec=1h             # good enough for daily jobs
+
+[Install]
+WantedBy=timers.target
