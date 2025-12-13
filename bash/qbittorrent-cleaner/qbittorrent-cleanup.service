@@ -1,3 +1,14 @@
+# If User=root:
+# copy this file to /etc/systemd/system
+#
+# If User =/= root:
+# Copy this file and the related .timer file to ~/.config/systemd/user/ while logged in as the user set under the [Service] -> User variable
+# systemctl --user daemon-reload
+# systemctl --user enable --now qbittorrent-cleanup.timer
+# systemctl --user list-timers
+# systemctl --user status qbittorrent-cleanup.service
+# journalctl --user -u qbittorrent-cleanup.service -f
+
 [Unit]
 Description=qBittorrent Unmanaged Files & Folders Cleanup
 After=network-online.target
@@ -6,14 +17,17 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=andrewscott                
-WorkingDirectory=/opt/script   # ← folder where the script lives
-ExecStart=/usr/bin/env bash /opt/script/qbit-cleanup-complete.sh
+Group=media
+# folder where the script lives. Comment this line out if not running User=root or maks sure the user can cd into the directory
+WorkingDirectory=/opt/script
+ExecStart=/usr/bin/bash /opt/script/qbittorrent-cleanup.sh
 StandardOutput=journal
 StandardError=journal
 
 # Security hardening
 ProtectSystem=strict
-ProtectHome=no                   # we need to read/write in home
+ReadWritePaths=/mnt/sdb2/common
+ProtectHome=yes
 PrivateTmp=yes
 NoNewPrivileges=yes
 
