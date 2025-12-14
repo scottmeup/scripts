@@ -91,6 +91,9 @@ get_qbittorrent_files() {
                 QBIT_MANAGED_FILES["${full_path//\/\//\/}"]=1
             fi
         else
+            if [[ -n "$content_path" && "$content_path" != "null" ]]; then
+                QBIT_MANAGED_FILES["$content_path"]=1
+            fi
             # Multi-file torrent
             while IFS= read -r rel_path; do
                 [[ -z "$rel_path" ]] && continue
@@ -160,9 +163,16 @@ filter_array() {
 
     output_ref=()
 
-    for path in "${!input_ref[@]}"; do
-        [[ -z "${exclusions_ref[$path]}" ]] && output_ref+=("$path")
-    done
+    # Detect if input is associative (-A) or indexed
+    if declare -p "$1" 2>/dev/null | grep -q 'declare -A'; then
+        for path in "${!input_ref[@]}"; do
+            [[ -z "${exclusions_ref[$path]}" ]] && output_ref+=("$path")
+        done
+    else
+        for path in "${input_ref[@]}"; do
+            [[ -z "${exclusions_ref[$path]}" ]] && output_ref+=("$path")
+        done
+    fi
 }
 
 dump_all_arrays_to_files() {
@@ -237,6 +247,7 @@ delete_unmanaged_content() {
     if [[ "$DRY_RUN" != "true" && $(( ${#UNMANAGED_FILES[@]} + ${#UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]} )) -gt $SAFETY_CHECK_MAX_FILES_TO_ALLOW_DELETION ]]; then
         echo "ERROR: More than $SAFETY_CHECK_MAX_FILES_TO_ALLOW_DELETION items queued for deletion and dry-run is OFF." | tee -a "$LOG_FILE"
         echo "Refusing to proceed without explicit confirmation." | tee -a "$LOG_FILE"
+        chmod 666 $LOG_FILE
         return 1
     fi
 
@@ -250,6 +261,7 @@ delete_unmanaged_content() {
         read -r -p "Type 'DELETE' to continue: " answer
         [[ "$answer" == "DELETE" ]] || {
             echo "Aborted by user." | tee -a "$LOG_FILE"
+            chmod 666 $LOG_FILE
             return 1
         }
     fi
@@ -299,6 +311,7 @@ delete_unmanaged_content() {
         (( failed > 0 )) && echo "   Failed operations  : $failed" | tee -a "$LOG_FILE"
     fi
     echo "=================================================" | tee -a "$LOG_FILE"
+    chmod 666 $LOG_FILE
 }
 
 # ====================== MAIN ======================
