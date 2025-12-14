@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-DEBUG=false
+DEBUG=true
 
 IFS_ORIGINAL=$IFS
 
@@ -27,11 +27,12 @@ declare -a UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS=()
 
 # Config
 QB_INSTANCES_FILE="qb_instances.lst"
-OUTPUT_DIRECTORY="/tmp/qbittorrent-cleanup"
+OUTPUT_DIRECTORY="/mnt/sdb2/common/logs/qbittorrent-cleanup"
 OUTPUT_MINIMUM_AGE_DAYS=14
 OUTPUT_MINIMUM_AGE_MINUTES=$(( OUTPUT_MINIMUM_AGE_DAYS * 1440 ))
 
-mkdir -p "$OUTPUT_DIRECTORY"
+try mkdir -p "$OUTPUT_DIRECTORY"
+rm $OUTPUT_DIRECTORY/deletion*.log
 
 [[ ! -f "$QB_INSTANCES_FILE" ]] && die "Missing $QB_INSTANCES_FILE"
 
@@ -166,7 +167,7 @@ filter_array() {
 
 dump_all_arrays_to_files() {
     local out="$OUTPUT_DIRECTORY"
-    mkdir -p "$out"
+    #mkdir -p "$out"
 
     echo "=== Dumping all arrays to individual files in $out ==="
 
@@ -174,7 +175,9 @@ dump_all_arrays_to_files() {
     printf '%s\n' "${QBIT_SAVE_PATHS_PRUNED[@]}"              | sort > "$out/pruned-save-paths.txt"
     printf '%s\n' "${UNMANAGED_FILES[@]}"     | sort > "$out/unmanaged-files.txt"
     printf '%s\n' "${UNMANAGED_DIRECTORIES[@]}"  > "$out/unmanaged-directories.txt"
+    printf '%s\n' "${UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]}"  > "$out/filesystem-unmanaged-directories-minus-save-paths.txt"
     printf '%s\n' "${FILE_SYSTEM_ALL_DIRECTORIES_SORTED_LARGEST_DESCENDING[@]}"  > "$out/all-directories-sorted-deepest-first.txt"
+
 
     # 2. Associative arrays
     {
@@ -192,21 +195,18 @@ dump_all_arrays_to_files() {
     {
         for k in "${!FILE_SYSTEM_ALL_DIRECTORIES[@]}";   do echo "$k"; done
     } | sort > "$out/filesystem-all-directories.txt"
-    {
-        for k in "${!UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]}";   do echo "$k"; done
-    } | sort > "$out/filesystem-all-directories - save paths.txt"
 
     # Optional: also dump counts in one summary file
     {
         echo "=== ARRAY SIZES $(date) ==="
-        echo "Pruned save paths                   : ${#QBIT_SAVE_PATHS_PRUNED[@]}"
-        echo "qBittorrent save paths              : ${#QBIT_SAVE_PATHS[@]}"
-        echo "qBittorrent managed files           : ${#QBIT_MANAGED_FILES[@]}"
-        echo "Filesystem all files (>$OUTPUT_MINIMUM_AGE_DAYS d)       : ${#FILE_SYSTEM_ALL_FILES[@]}"
-        echo "Filesystem all directories          : ${#FILE_SYSTEM_ALL_DIRECTORIES[@]}"
-        echo "Unmanaged files                     : ${#UNMANAGED_FILES[@]}"
-        echo "Unmanaged directories               : ${#UNMANAGED_DIRECTORIES[@]}"
-        echo "Unmanaged directories - save paths  : ${#UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]}"
+        echo "Pruned save paths                         : ${#QBIT_SAVE_PATHS_PRUNED[@]}"
+        echo "qBittorrent save paths                    : ${#QBIT_SAVE_PATHS[@]}"
+        echo "qBittorrent managed files                 : ${#QBIT_MANAGED_FILES[@]}"
+        echo "Filesystem all files (>$OUTPUT_MINIMUM_AGE_DAYS d)              : ${#FILE_SYSTEM_ALL_FILES[@]}"
+        echo "Filesystem all directories                : ${#FILE_SYSTEM_ALL_DIRECTORIES[@]}"
+        echo "Unmanaged files                           : ${#UNMANAGED_FILES[@]}"
+        echo "Unmanaged directories                     : ${#UNMANAGED_DIRECTORIES[@]}"
+        echo "Unmanaged directories without save paths  : ${#UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]}"
     } > "$out/00-ARRAY-SUMMARY.txt"
 
     echo "All arrays dumped to individual files in $out"
@@ -223,18 +223,18 @@ delete_unmanaged_content() {
     local LOG_FILE="$OUTPUT_DIRECTORY/deletion_$(date +%Y%m%d_%H%M%S).log"
     local SAFETY_CHECK_MAX_FILES_TO_ALLOW_DELETION=5000
 
-    mkdir -p "$OUTPUT_DIRECTORY"
+    #mkdir -p "$OUTPUT_DIRECTORY"
 
     echo "=================================================" | tee -a "$LOG_FILE"
     echo "UNMANAGED CONTENT DELETION $(date)"           | tee -a "$LOG_FILE"
     echo "Dry-run mode      : $DRY_RUN"                 | tee -a "$LOG_FILE"
     echo "Files to delete    : ${#UNMANAGED_FILES[@]}"   | tee -a "$LOG_FILE"
-    echo "Directories to delete : ${#UNMANAGED_DIRECTORIES[@]}" | tee -a "$LOG_FILE"
+    echo "Directories to delete : ${#UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]}" | tee -a "$LOG_FILE"
     echo "Log file           : $LOG_FILE"              | tee -a "$LOG_FILE"
     echo "=================================================" | tee -a "$LOG_FILE"
 
     # Safety check – refuse to run without dry-run if lists are huge
-    if [[ "$DRY_RUN" != "true" && $(( ${#UNMANAGED_FILES[@]} + ${#UNMANAGED_DIRECTORIES[@]} )) -gt $SAFETY_CHECK_MAX_FILES_TO_ALLOW_DELETION ]]; then
+    if [[ "$DRY_RUN" != "true" && $(( ${#UNMANAGED_FILES[@]} + ${#UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]} )) -gt $SAFETY_CHECK_MAX_FILES_TO_ALLOW_DELETION ]]; then
         echo "ERROR: More than $SAFETY_CHECK_MAX_FILES_TO_ALLOW_DELETION items queued for deletion and dry-run is OFF." | tee -a "$LOG_FILE"
         echo "Refusing to proceed without explicit confirmation." | tee -a "$LOG_FILE"
         return 1
@@ -245,7 +245,7 @@ delete_unmanaged_content() {
         echo
         echo "You are about to PERMANENTLY DELETE:"
         echo "   ${#UNMANAGED_FILES[@]} files"
-        echo "   ${#UNMANAGED_DIRECTORIES[@]} directories"
+        echo "   ${#UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]} directories"
         echo "This action CANNOT be undone."
         read -r -p "Type 'DELETE' to continue: " answer
         [[ "$answer" == "DELETE" ]] || {
@@ -272,13 +272,13 @@ delete_unmanaged_content() {
     done
 
     # 2. Delete directories – deepest first 
-    for dir in "${UNMANAGED_DIRECTORIES[@]}"; do
+    for dir in "${UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]}"; do
         [[ -d "$dir" ]] || continue  # skip if already gone
 
         if [[ "$DRY_RUN" == "true" ]]; then
             echo "[DRY-RUN] Would delete directory: $dir" | tee -a "$LOG_FILE"
         else
-            if rm -rf "$dir" 2>>"$LOG_FILE"; then
+            if rmdir "$dir" 2>>"$LOG_FILE"; then
                 ((deleted_dirs++))
                 echo "[DELETED] Directory: $dir" >> "$LOG_FILE"
             else
@@ -345,5 +345,5 @@ filter_array UNMANAGED_DIRECTORIES QBIT_SAVE_PATHS UNMANAGED_DIRECTORIES_MINUS_B
 
 echo "Done!"
 echo "Unmanaged files: ${#UNMANAGED_FILES[@]} → $OUTPUT_DIRECTORY/filtered-file-list.txt"
-echo "Unmanaged directories: ${#UNMANAGED_DIRECTORIES[@]} → $OUTPUT_DIRECTORY/filtered-directory-list.txt"
+echo "Unmanaged directories: ${#UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]} → $OUTPUT_DIRECTORY/filtered-directory-list.txt"
 delete_unmanaged_content true
