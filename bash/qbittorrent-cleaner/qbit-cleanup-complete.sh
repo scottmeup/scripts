@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-DEBUG=true
+DEBUG=false
 
-IFS_ORIGINAL=$IFS
+#IFS_ORIGINAL=$IFS
 
 if $DEBUG; then
     export PS4='+(${BASH_SOURCE}:${LINENO}): ${FUNCNAME[0]:+${FUNCNAME[0]}(): }'
@@ -14,7 +14,7 @@ yell() { echo "$0: $*" >&2; }
 die() { yell "$1"; exit "${2:-1}"; }
 try() { "$@" || die "Failed: $*"; }
 
-# === Global associative and indexed arrays (MUST be global) ===
+# === Global associative and indexed arrays  ===
 declare -A QBIT_MANAGED_FILES=()             # All files currently in use by qBittorrent
 declare -A QBIT_SAVE_PATHS=()                     # Base save path for each category with a torrent that was retrieved
 declare -A FILE_SYSTEM_ALL_FILES=()          # Recursive listing for all files inside all QBIT_SAVE_PATHS
@@ -30,9 +30,10 @@ QB_INSTANCES_FILE="qb_instances.lst"
 OUTPUT_DIRECTORY="/mnt/sdb2/common/logs/qbittorrent-cleanup"
 OUTPUT_MINIMUM_AGE_DAYS=14
 OUTPUT_MINIMUM_AGE_MINUTES=$(( OUTPUT_MINIMUM_AGE_DAYS * 1440 ))
-
-try mkdir -p "$OUTPUT_DIRECTORY"
-rm $OUTPUT_DIRECTORY/deletion*.log
+DRY_RUN=false     # Dry run mode if true, remove files from filesystem if false 
+CONFIRM=false     # Interactively confirm before deletions if true, process delections automatically if false  
+SAFETY_CHECK_MAX_FILES_TO_ALLOW_DELETION=5000    # Abort deletion if more than this number of files will be removed
+WRITE_DELETION_LOG_FILE=false
 
 [[ ! -f "$QB_INSTANCES_FILE" ]] && die "Missing $QB_INSTANCES_FILE"
 
@@ -177,7 +178,6 @@ filter_array() {
 
 dump_all_arrays_to_files() {
     local out="$OUTPUT_DIRECTORY"
-    #mkdir -p "$out"
 
     echo "=== Dumping all arrays to individual files in $out ==="
 
@@ -187,7 +187,6 @@ dump_all_arrays_to_files() {
     printf '%s\n' "${UNMANAGED_DIRECTORIES[@]}"  > "$out/unmanaged-directories.txt"
     printf '%s\n' "${UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]}"  > "$out/filesystem-unmanaged-directories-minus-save-paths.txt"
     printf '%s\n' "${FILE_SYSTEM_ALL_DIRECTORIES_SORTED_LARGEST_DESCENDING[@]}"  > "$out/all-directories-sorted-deepest-first.txt"
-
 
     # 2. Associative arrays
     {
@@ -222,32 +221,28 @@ dump_all_arrays_to_files() {
     echo "All arrays dumped to individual files in $out"
 }
 
-
 delete_unmanaged_content() {
-    # delete_unmanaged_content false = dry run
-    # delete_unmanaged_content true = delete interactively
-    # delete_unmanaged_content true true = delete without interaction. use with caution.
 
-    local DRY_RUN="${1:-true}"          # pass "false" to actually delete
-    local CONFIRM="${2:-true}"          # set to false to skip interactive prompt
-    local LOG_FILE="$OUTPUT_DIRECTORY/deletion_$(date +%Y%m%d_%H%M%S).log"
-    local SAFETY_CHECK_MAX_FILES_TO_ALLOW_DELETION=5000
-
-    #mkdir -p "$OUTPUT_DIRECTORY"
+    if $WRITE_DELETION_LOG_FILE; then
+        local LOG_FILE="$OUTPUT_DIRECTORY/deletion_$(date +%Y%m%d_%H%M%S).log"
+    else
+        local LOG_FILE=/dev/null
+    fi
 
     echo "=================================================" | tee -a "$LOG_FILE"
     echo "UNMANAGED CONTENT DELETION $(date)"           | tee -a "$LOG_FILE"
     echo "Dry-run mode      : $DRY_RUN"                 | tee -a "$LOG_FILE"
     echo "Files to delete    : ${#UNMANAGED_FILES[@]}"   | tee -a "$LOG_FILE"
     echo "Directories to delete : ${#UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]}" | tee -a "$LOG_FILE"
-    echo "Log file           : $LOG_FILE"              | tee -a "$LOG_FILE"
+    if $WRITE_DELETION_LOG_FILE; then
+        echo "Log file           : $LOG_FILE"              | tee -a "$LOG_FILE"
+    fi
     echo "=================================================" | tee -a "$LOG_FILE"
 
     # Safety check – refuse to run without dry-run if lists are huge
     if [[ "$DRY_RUN" != "true" && $(( ${#UNMANAGED_FILES[@]} + ${#UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]} )) -gt $SAFETY_CHECK_MAX_FILES_TO_ALLOW_DELETION ]]; then
         echo "ERROR: More than $SAFETY_CHECK_MAX_FILES_TO_ALLOW_DELETION items queued for deletion and dry-run is OFF." | tee -a "$LOG_FILE"
         echo "Refusing to proceed without explicit confirmation." | tee -a "$LOG_FILE"
-        chmod 666 $LOG_FILE
         return 1
     fi
 
@@ -261,7 +256,6 @@ delete_unmanaged_content() {
         read -r -p "Type 'DELETE' to continue: " answer
         [[ "$answer" == "DELETE" ]] || {
             echo "Aborted by user." | tee -a "$LOG_FILE"
-            chmod 666 $LOG_FILE
             return 1
         }
     fi
@@ -311,10 +305,13 @@ delete_unmanaged_content() {
         (( failed > 0 )) && echo "   Failed operations  : $failed" | tee -a "$LOG_FILE"
     fi
     echo "=================================================" | tee -a "$LOG_FILE"
-    chmod 666 $LOG_FILE
 }
 
 # ====================== MAIN ======================
+
+try mkdir -p "$OUTPUT_DIRECTORY"
+
+[[ ! -f "$QB_INSTANCES_FILE" ]] && die "Missing $QB_INSTANCES_FILE"
 
 echo "Processing qBittorrent instances..."
 
@@ -351,12 +348,8 @@ filter_array UNMANAGED_DIRECTORIES QBIT_SAVE_PATHS UNMANAGED_DIRECTORIES_MINUS_B
 
 # === Output Results ===
 {
-    printf '%s\n' "${UNMANAGED_FILES[@]}" | sort > "$OUTPUT_DIRECTORY/filtered-file-list.txt"
-    printf '%s\n' "${UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]}" > "$OUTPUT_DIRECTORY/filtered-directory-list.txt"
     $DEBUG && dump_all_arrays_to_files
 } 
 
+delete_unmanaged_content
 echo "Done!"
-echo "Unmanaged files: ${#UNMANAGED_FILES[@]} → $OUTPUT_DIRECTORY/filtered-file-list.txt"
-echo "Unmanaged directories: ${#UNMANAGED_DIRECTORIES_MINUS_BASE_SAVE_PATHS[@]} → $OUTPUT_DIRECTORY/filtered-directory-list.txt"
-delete_unmanaged_content true
