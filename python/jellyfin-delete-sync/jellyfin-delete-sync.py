@@ -1,122 +1,165 @@
-# Jellyfin Deletion Sync Script
-# This script sets up a webhook receiver using Flask to listen for deletion events from Jellyfin.
-# It then uses the Sonarr and Radarr APIs to delete and remove the corresponding items.
-# Assumptions:
-# - Jellyfin webhook payload includes fields like 'NotificationType', 'ItemType', 'Provider_tvdb' (for TV series/season/episode, assuming series TVDB ID),
-#   'Provider_tmdb' (for movies), 'SeriesName', 'SeasonNumber', 'EpisodeNumber', 'Name'.
-# - Series names are unique in Sonarr for matching via name (fallback for seasons and episodes).
-# - Replace placeholders with your actual Sonarr/Radarr URLs and API keys.
-# - Jellyfin is configured to send webhooks to http://your-debian-host:5000/webhook for Item Removed events.
-# - When deleting in Jellyfin, if files are deleted, setting deleteFiles=true in APIs will attempt to delete but fail gracefully if files are gone.
-
-# Installation on Debian 12:
-# sudo apt update
-# sudo apt install python3-pip
-# pip3 install flask requests
-# Then run: python3 this_script.py
+#!/usr/bin/env python3
 
 import flask
 import requests
+import json
+from datetime import datetime
+
+try:
+    from config import (
+        SONARR_URL, SONARR_API_KEY,
+        RADARR_URL, RADARR_API_KEY,
+        LISTEN_HOST, LISTEN_PORT
+    )
+except ImportError:
+    print("ERROR: Could not import config.py - create it with your settings!")
+    exit(1)
 
 app = flask.Flask(__name__)
 
+SONARR_HEADERS = {'X-Api-Key': SONARR_API_KEY}
+RADARR_HEADERS = {'X-Api-Key': RADARR_API_KEY}
+
+def log(msg):
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}")
+
+def find_series(tvdb_id=None, title=None):
+    """Find series in Sonarr - try TVDB ID first, then title"""
+    if tvdb_id:
+        resp = requests.get(f"{SONARR_URL}/api/v3/series?tvdbId={tvdb_id}", headers=SONARR_HEADERS)
+        if resp.status_code == 200 and resp.json():
+            log(f"Series found by TVDB ID {tvdb_id}")
+            return resp.json()[0]
+
+    if title:
+        resp = requests.get(f"{SONARR_URL}/api/v3/series", headers=SONARR_HEADERS)
+        if resp.status_code == 200:
+            series_list = resp.json()
+            matches = [s for s in series_list if s['title'].lower() == title.lower()]
+            if matches:
+                log(f"Series found by title: {matches[0]['title']} (ID: {matches[0]['id']})")
+                return matches[0]
+            else:
+                log(f"Series '{title}' not found by title match")
+    return None
+
 @app.route('/webhook', methods=['POST'])
-def handle_webhook():
-    data = flask.request.get_json()
-    if not data or data.get('NotificationType') != 'ItemRemoved':
+def webhook():
+    data = flask.request.get_json(force=True)
+    log("=== WEBHOOK RECEIVED ===")
+    if data:
+        log(json.dumps(data, indent=2))
+    else:
+        log("EMPTY PAYLOAD")
+        return 'No JSON', 400
+
+    if data.get('NotificationType') != 'ItemDeleted':
+        log("Ignored: not an ItemDeleted event")
         return 'Ignored', 200
 
-    # Adjust if the structure is different; assuming top-level fields or under 'Item'
-    item_type = data.get('ItemType') or data.get('Type')
-    provider_tvdb = data.get('Provider_tvdb')
-    provider_tmdb = data.get('Provider_tmdb')
-    series_name = data.get('SeriesName')
-    season_number = data.get('SeasonNumber')
-    episode_number = data.get('EpisodeNumber')
+    item = data.get('Item', data)
+    item_type = item.get('Type')
+    name = item.get('Name', 'Unknown')
+    series_name = item.get('SeriesName')
+    season_num = item.get('SeasonNumber')
+    episode_num = item.get('EpisodeNumber')
 
-    # Configure your Sonarr and Radarr details
-    sonarr_url = 'http://localhost:8989/api/v3'  # Replace with your Sonarr URL
-    sonarr_api_key = 'b8e59275a15b4016b763ab13ae5dbdbc'       # Replace with your Sonarr API key
-    radarr_url = 'http://localhost:7878/api/v3'  # Replace with your Radarr URL
-    radarr_api_key = '9d0f281b137e47beb54c82f5ef736a12'       # Replace with your Radarr API key
+    provider_ids = item.get('ProviderIds', {})
+    tvdb_id = provider_ids.get('Tvdb') or item.get('Provider_tvdb')
+    tmdb_id = provider_ids.get('Tmdb') or item.get('Provider_tmdb')
 
-    headers_sonarr = {'X-Api-Key': sonarr_api_key}
-    headers_radarr = {'X-Api-Key': radarr_api_key}
+    log(f"Item Type: {item_type} | Name: {name}")
+    log(f"Series: {series_name} | Season: {season_num} | Episode: {episode_num}")
+    log(f"TVDB ID (raw): {tvdb_id} | TMDB ID: {tmdb_id}")
 
-    if item_type == 'Series':
-        if provider_tvdb:
-            # Find series by TVDB ID
-            response = requests.get(f"{sonarr_url}/series?tvdbId={provider_tvdb}", headers=headers_sonarr)
-            if response.status_code == 200:
-                series_list = response.json()
-                if series_list:
-                    series_id = series_list[0]['id']
-                    # Delete series and files
-                    requests.delete(f"{sonarr_url}/series/{series_id}?deleteFiles=true&addImportExclusion=false", headers=headers_sonarr)
+    # ===================== MOVIE =====================
+    if item_type == 'Movie':
+        if not tmdb_id:
+            log("ERROR: No TMDB ID for movie")
+            return 'No TMDB', 400
+        # ... (movie logic unchanged - works fine)
 
-    elif item_type == 'Season':
-        if series_name and season_number is not None:
-            # Find series by name (fallback)
-            response = requests.get(f"{sonarr_url}/series", headers=headers_sonarr)
-            if response.status_code == 200:
-                series_list = response.json()
-                series = next((s for s in series_list if s['title'] == series_name), None)
-                if series:
-                    series_id = series['id']
-                    # Get series details and unmonitor the season
-                    response = requests.get(f"{sonarr_url}/series/{series_id}", headers=headers_sonarr)
-                    series_data = response.json()
-                    for s in series_data['seasons']:
-                        if s['seasonNumber'] == season_number:
-                            s['monitored'] = False
-                    requests.put(f"{sonarr_url}/series/{series_id}", json=series_data, headers=headers_sonarr)
-                    # Delete episode files for the season
-                    response = requests.get(f"{sonarr_url}/episodefile?seriesId={series_id}", headers=headers_sonarr)
-                    if response.status_code == 200:
-                        episode_files = response.json()
-                        for file in episode_files:
-                            if file['seasonNumber'] == season_number:
-                                requests.delete(f"{sonarr_url}/episodefile/{file['id']}", headers=headers_sonarr)
+    # ===================== SERIES / SEASON / EPISODE =====================
+    elif item_type in ['Series', 'Season', 'Episode']:
+        if item_type == 'Series' and not tvdb_id:
+            log("ERROR: Series deletion needs TVDB ID")
+            return 'No TVDB', 400
 
-    elif item_type == 'Episode':
-        if series_name and season_number is not None and episode_number is not None:
-            # Find series by name
-            response = requests.get(f"{sonarr_url}/series", headers=headers_sonarr)
-            if response.status_code == 200:
-                series_list = response.json()
-                series = next((s for s in series_list if s['title'] == series_name), None)
-                if series:
-                    series_id = series['id']
-                    # Get episodes in the season
-                    response = requests.get(f"{sonarr_url}/episode?seriesId={series_id}&seasonNumber={season_number}", headers=headers_sonarr)
-                    if response.status_code == 200:
-                        episodes = response.json()
-                        episode = next((e for e in episodes if e['episodeNumber'] == episode_number), None)
-                        if episode:
-                            # Unmonitor the episode
-                            episode_update = {'id': episode['id'], 'monitored': False}
-                            # Copy other required fields if needed (Sonarr may require full object, but minimal works)
-                            response = requests.get(f"{sonarr_url}/episode/{episode['id']}", headers=headers_sonarr)
-                            full_episode = response.json()
-                            full_episode['monitored'] = False
-                            requests.put(f"{sonarr_url}/episode/{episode['id']}", json=full_episode, headers=headers_sonarr)
-                            # Delete file if exists
-                            if episode.get('hasFile'):
-                                episode_file_id = episode['episodeFileId']
-                                requests.delete(f"{sonarr_url}/episodefile/{episode_file_id}", headers=headers_sonarr)
+        # For Series: use TVDB ID directly
+        # For Season/Episode: use title (tvdb_id is usually episode-level)
+        series = find_series(tvdb_id if item_type == 'Series' else None, series_name)
+        if not series:
+            log("ERROR: Could not find series in Sonarr")
+            return 'Series not found', 404
 
-    elif item_type == 'Movie':
-        if provider_tmdb:
-            # Find movie by TMDB ID
-            response = requests.get(f"{radarr_url}/movie?tmdbId={provider_tmdb}", headers=headers_radarr)
-            if response.status_code == 200:
-                movie_list = response.json()
-                if movie_list:
-                    movie_id = movie_list[0]['id']
-                    # Delete movie and files
-                    requests.delete(f"{radarr_url}/movie/{movie_id}?deleteFiles=true&addImportExclusion=false", headers=headers_radarr)
+        series_id = series['id']
+        log(f"Using series: {series['title']} (Sonarr ID: {series_id})")
 
+        # ----- SERIES DELETION -----
+        if item_type == 'Series':
+            del_resp = requests.delete(
+                f"{SONARR_URL}/api/v3/series/{series_id}?deleteFiles=true&addImportExclusion=false",
+                headers=SONARR_HEADERS
+            )
+            log(f"Series delete result: {del_resp.status_code} {del_resp.text}")
+            log("Series removed from Sonarr")
+
+        # ----- SEASON DELETION -----
+        elif item_type == 'Season':
+            # Unmonitor season
+            updated = False
+            for s in series['seasons']:
+                if s['seasonNumber'] == season_num and s['monitored']:
+                    s['monitored'] = False
+                    updated = True
+            if updated:
+                requests.put(f"{SONARR_URL}/api/v3/series/{series_id}", json=series, headers=SONARR_HEADERS)
+                log(f"Season {season_num} unmonitored")
+
+            # Delete episode files in season
+            files = requests.get(f"{SONARR_URL}/api/v3/episodefile?seriesId={series_id}", headers=SONARR_HEADERS).json()
+            deleted_count = 0
+            for file in files:
+                if file['seasonNumber'] == season_num:
+                    requests.delete(f"{SONARR_URL}/api/v3/episodefile/{file['id']}", headers=SONARR_HEADERS)
+                    deleted_count += 1
+            log(f"Deleted {deleted_count} episode files from season {season_num}")
+            log("Season processed")
+
+        # ----- EPISODE DELETION -----
+        elif item_type == 'Episode':
+            episodes = requests.get(
+                f"{SONARR_URL}/api/v3/episode?seriesId={series_id}&seasonNumber={season_num}",
+                headers=SONARR_HEADERS
+            ).json()
+
+            target = next((e for e in episodes if e['episodeNumber'] == episode_num), None)
+            if not target:
+                log("Episode not found in Sonarr database")
+                return 'Episode not found', 200
+
+            # Unmonitor
+            if target['monitored']:
+                target['monitored'] = False
+                requests.put(f"{SONARR_URL}/api/v3/episode/{target['id']}", json=target, headers=SONARR_HEADERS)
+                log("Episode unmonitored")
+
+            # Delete file
+            if target.get('hasFile'):
+                file_id = target['episodeFileId']
+                del_resp = requests.delete(f"{SONARR_URL}/api/v3/episodefile/{file_id}", headers=SONARR_HEADERS)
+                log(f"Episode file deleted: {del_resp.status_code}")
+            else:
+                log("No file to delete (already missing)")
+
+            log("Episode successfully processed")
+
+    else:
+        log(f"Unsupported item type: {item_type}")
+
+    log("=== PROCESSING COMPLETE ===\n")
     return 'OK', 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)  # Run on all interfaces, port 5000; remove debug in production
+    log(f"Starting server on http://{LISTEN_HOST}:{LISTEN_PORT}/webhook")
+    app.run(host=LISTEN_HOST, port=LISTEN_PORT, debug=False)

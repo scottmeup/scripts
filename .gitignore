@@ -3,3 +3,6 @@
 bash/qbittorrent-cleaner/qb_instances.lst
 *sync-conflict*
 /bash/qbittorrent-cleaner/output
+/python/jellyfin-delete-sync/__pycache__
+python/jellyfin-delete-sync/config.py
+*.tmp

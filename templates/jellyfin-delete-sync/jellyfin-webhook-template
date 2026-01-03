@@ -1,22 +1,46 @@
 # Jellyfin Setup
-# 
-# Webhook Url: Listed by the script when initialized
+#
+# Server URL: 
+#	The adress of your jellyfin server 
+#
+# Webhook Url: 
+#	Listed by the script when initialized
+#
 # Status: 
 # 	Enable
+#
 # Notification Type: 
 #	Item Deleted
+#
 # Item Type:
 #	Movies
 # 	Episodes
 #	Season
 #	Series
+#
+# Add Request Header:
+#	Key:
+#		Content-Type
+#	Calue:
+#		application/json
+#
+
 
 {
-    "ItemType": "{{{ItemType}}}",
-    "ItemId: "{{{ItemId}}}",
-    "Name": "{{{Name}}}",
-    "SeriesName: "{{{SeriesName}}}",
-    "SeriesId: "{{{SeriesId}}}",
-    "SeasonNumber: "{{{SeasonNumber}}}",
-    "EpisodeNumber: "{{{EpisodeNumber}}}",
+  "NotificationType": "{{NotificationType}}",
+  "Item": {
+    "Type": "{{ItemType}}",
+    "Name": "{{Name}}",
+    "SeriesName": "{{SeriesName}}",
+    "SeasonNumber": {{SeasonNumber}},
+    "EpisodeNumber": {{EpisodeNumber}},
+    "Year": {{Year}},
+    "Overview": "{{Overview}}",
+    "ItemId": "{{ItemId}}",
+    "ProviderIds": {
+      "Tmdb": "{{Provider_tmdb}}",
+      "Tvdb": "{{Provider_tvdb}}",
+      "Imdb": "{{Provider_imdb}}"
+    }
+  }
 }
