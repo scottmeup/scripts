@@ -6,3 +6,4 @@ bash/qbittorrent-cleaner/qb_instances.lst
 /python/jellyfin-delete-sync/__pycache__
 python/jellyfin-delete-sync/config.py
 *.tmp
+python/jellyfin-delete-sync/episode_map.db

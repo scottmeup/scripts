@@ -1,13 +1,14 @@
 # fill the details, save this file as config.py and place it in the same directory as the main script
 
-# Sonarr Configuration
-SONARR_URL = 'http://localhost:8989'                  # e.g., http://192.168.1.100:8989
-SONARR_API_KEY = 'your-sonarr-api-key'                # REPLACE WITH REAL KEY
+SONARR_URL = 'http://localhost:8989'
+SONARR_API_KEY = 'your-sonarr-api-key-here'
 
-# Radarr Configuration
-RADARR_URL = 'http://localhost:7878'                  # e.g., http://192.168.1.100:7878
-RADARR_API_KEY = 'your-radarr-api-key'                # REPLACE WITH REAL KEY
+RADARR_URL = 'http://localhost:7878'
+RADARR_API_KEY = 'your-radarr-api-key-here'
 
-# Webhook Listener
-LISTEN_HOST = '0.0.0.0'   # Listen on all interfaces
-LISTEN_PORT = 5373        # Listen on this port
+LISTEN_HOST = '0.0.0.0'
+LISTEN_PORT = 5373
+
+# Optional: Auto-rebuild episode map every N minutes
+# Set to None to disable, or e.g. 1440 for once per day, 60 for hourly
+REBUILD_INTERVAL_MINUTES = None   # Change to 1440 or any number > 0 to enable
