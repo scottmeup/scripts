@@ -1,0 +1,22 @@
+# Jellyfin Setup
+# 
+# Webhook Url: Listed by the script when initialized
+# Status: 
+# 	Enable
+# Notification Type: 
+#	Item Deleted
+# Item Type:
+#	Movies
+# 	Episodes
+#	Season
+#	Series
+
+{
+    "ItemType": "{{{ItemType}}}",
+    "ItemId: "{{{ItemId}}}",
+    "Name": "{{{Name}}}",
+    "SeriesName: "{{{SeriesName}}}",
+    "SeriesId: "{{{SeriesId}}}",
+    "SeasonNumber: "{{{SeasonNumber}}}",
+    "EpisodeNumber: "{{{EpisodeNumber}}}",
+}
