@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 
 # jellyfin_sync.py
-# Version: 2.4.0
+# Version: 3.0.0
 # Date: January 04, 2026
 #
 # Changelog:
-# 2.4.0 - Updated refresh schedule validation
-#         - Now allows REFRESH_INTERVAL_MINUTES or REFRESH_SCHEDULE to be unset (None)
-#         - Allows exactly zero or one to be set
-#         - Disallows both being set at the same time
-#         - No automatic refresh if both are None (optional refresh)
-#         - Clear error message if both are defined
-# 2.3.0 - Fixed missing json_repair function
-# 2.2.0 - Safe config import with getattr
+# 3.0.0 - Added configurable deletion behavior for Series and Season
+#         - New config options: SERIES_DELETION_MODE and SEASON_DELETION_MODE (1, 2, or 3)
+#         - Mode 1: Safe - only delete files from affected items
+#         - Mode 2: Aggressive - full series/season unmonitor or removal
+#         - Mode 3: Smart - conditional full cleanup based on completion status
+#         - Validation on startup
+# 2.4.0 - Flexible refresh (zero, one, or none)
 
 import flask
 import requests
@@ -27,6 +26,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+# Import config module safely
 try:
     import config
     SONARR_URL = config.SONARR_URL
@@ -37,9 +37,11 @@ try:
     LISTEN_PORT = config.LISTEN_PORT
     REFRESH_INTERVAL_MINUTES = getattr(config, 'REFRESH_INTERVAL_MINUTES', None)
     REFRESH_SCHEDULE = getattr(config, 'REFRESH_SCHEDULE', None)
+    SERIES_DELETION_MODE = getattr(config, 'SERIES_DELETION_MODE', 1)
+    SEASON_DELETION_MODE = getattr(config, 'SEASON_DELETION_MODE', 1)
 except ImportError as e:
     print("ERROR: Could not import config.py")
-    print("Make sure config.py exists in the same directory and contains all required settings.")
+    print("Make sure config.py exists in the same directory.")
     print(f"Import error: {e}")
     exit(1)
 except AttributeError as e:
@@ -47,29 +49,30 @@ except AttributeError as e:
     print(f"Missing: {e}")
     exit(1)
 
-# Validate refresh schedule: allow zero or one, but not both
-if REFRESH_INTERVAL_MINUTES is not None and REFRESH_SCHEDULE is not None:
-    print("ERROR: Invalid refresh schedule configuration in config.py")
-    print("You cannot define both REFRESH_INTERVAL_MINUTES and REFRESH_SCHEDULE at the same time.")
-    print("")
-    print("Current values:")
-    print(f"  REFRESH_INTERVAL_MINUTES = {REFRESH_INTERVAL_MINUTES}")
-    print(f"  REFRESH_SCHEDULE = {REFRESH_SCHEDULE}")
-    print("")
-    print("Choose one or neither (no automatic refresh if both are None).")
+# Validate deletion modes
+if SERIES_DELETION_MODE not in (1, 2, 3):
+    print("ERROR: SERIES_DELETION_MODE must be 1, 2, or 3")
+    print(f"Current value: {SERIES_DELETION_MODE}")
     exit(1)
 
-# Optional additional validation if one is set
+if SEASON_DELETION_MODE not in (1, 2, 3):
+    print("ERROR: SEASON_DELETION_MODE must be 1, 2, or 3")
+    print(f"Current value: {SEASON_DELETION_MODE}")
+    exit(1)
+
+# Validate refresh schedule
+if REFRESH_INTERVAL_MINUTES is not None and REFRESH_SCHEDULE is not None:
+    print("ERROR: You cannot define both REFRESH_INTERVAL_MINUTES and REFRESH_SCHEDULE")
+    exit(1)
+
 if REFRESH_INTERVAL_MINUTES is not None:
     if not isinstance(REFRESH_INTERVAL_MINUTES, int) or REFRESH_INTERVAL_MINUTES <= 0:
-        print("ERROR: REFRESH_INTERVAL_MINUTES must be a positive integer if defined")
-        print(f"Current value: {REFRESH_INTERVAL_MINUTES}")
+        print("ERROR: REFRESH_INTERVAL_MINUTES must be a positive integer")
         exit(1)
 
 if REFRESH_SCHEDULE is not None:
     if not isinstance(REFRESH_SCHEDULE, list) or len(REFRESH_SCHEDULE) == 0:
-        print("ERROR: REFRESH_SCHEDULE must be a non-empty list if defined")
-        print(f"Current value: {REFRESH_SCHEDULE}")
+        print("ERROR: REFRESH_SCHEDULE must be a non-empty list")
         exit(1)
     for i, sched in enumerate(REFRESH_SCHEDULE):
         if not isinstance(sched, dict):
@@ -151,7 +154,6 @@ def init_database():
                 FOREIGN KEY (series_id) REFERENCES series (series_id)
             )
         ''')
-
         cur.execute('''
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -176,7 +178,6 @@ def save_setting(key, value):
         conn.commit()
     except Exception as e:
         log(f"ERROR saving setting {key}: {e}")
-        log(traceback.format_exc())
     finally:
         conn.close()
 
@@ -191,39 +192,30 @@ def load_setting(key, default=None):
         return row['value'] if row else default
     except Exception as e:
         log(f"ERROR loading setting {key}: {e}")
-        log(traceback.format_exc())
         return default
     finally:
         conn.close()
 
 def json_repair(raw_body):
-    """Ultimate line-by-line repair for the most broken Jellyfin JSON - now safe from IndexError"""
     lines = raw_body.splitlines()
     repaired_lines = []
     last_was_value = False
 
     for line in lines:
         stripped = line.strip()
-
-        # Skip completely empty lines
         if not stripped:
             continue
 
-        # If previous line ended with a value and current line starts with a key, add comma to previous
         if last_was_value and stripped.startswith('"') and ':' in stripped:
             if repaired_lines:
                 repaired_lines[-1] = repaired_lines[-1].rstrip() + ','
 
-        # Fix empty values ": ,"
         line = re.sub(r':\s*,', ': null,', line)
-
-        # Remove stray incomplete keys like "Dummy":
         line = re.sub(r',\s*"[\w]+":\s*$', '', line)
         line = re.sub(r'\s*"[\w]+":\s*$', '', line)
 
         repaired_lines.append(line)
 
-        # Determine if this line ends with a value - safely
         if len(stripped) > 0:
             last_char = stripped[-1]
             if last_char in ('"', '}', ']', 'l', 'e') or last_char.isdigit():
@@ -234,16 +226,39 @@ def json_repair(raw_body):
             last_was_value = False
 
     repaired = '\n'.join(repaired_lines)
-
-    # Final cleanup: remove trailing commas before } or ]
     repaired = re.sub(r',\s*}', '}', repaired)
     repaired = re.sub(r',\s*]', ']', repaired)
 
-    # Ensure it ends with }
     if not repaired.endswith('}'):
         repaired += '}'
 
     return repaired
+
+def is_series_fully_downloaded(series):
+    try:
+        eps_resp = requests.get(f"{SONARR_URL}/api/v3/episode?seriesId={series['id']}", headers=SONARR_HEADERS, timeout=30)
+        if eps_resp.status_code != 200:
+            return False
+        episodes = eps_resp.json()
+        for ep in episodes:
+            if ep['monitored'] and not ep.get('hasFile', False):
+                return False
+        return True
+    except Exception:
+        return False
+
+def is_season_fully_downloaded(series, season_number):
+    try:
+        eps_resp = requests.get(f"{SONARR_URL}/api/v3/episode?seriesId={series['id']}&seasonNumber={season_number}", headers=SONARR_HEADERS, timeout=30)
+        if eps_resp.status_code != 200:
+            return False
+        episodes = eps_resp.json()
+        for ep in episodes:
+            if ep['monitored'] and not ep.get('hasFile', False):
+                return False
+        return True
+    except Exception:
+        return False
 
 def build_provider_map():
     log("Building full provider map from Sonarr and Radarr...")
@@ -381,6 +396,50 @@ def setup_scheduler():
 
     return scheduler
 
+def find_series_via_map(episode_tvdb_id):
+    conn = get_db_connection()
+    if conn is None:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute('SELECT series_id FROM episode_map WHERE episode_tvdb_id = ?', (episode_tvdb_id,))
+        row = cur.fetchone()
+        if row:
+            series_id = row['series_id']
+            log(f"Map hit: episode TVDB {episode_tvdb_id} → series ID {series_id}")
+            resp = requests.get(f"{SONARR_URL}/api/v3/series/{series_id}", headers=SONARR_HEADERS, timeout=30)
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception as e:
+        log(f"ERROR in find_series_via_map: {e}")
+        log(traceback.format_exc())
+    finally:
+        try:
+            conn.close()
+        except:
+            pass
+    return None
+
+def find_series(tvdb_id=None, title=None):
+    try:
+        if tvdb_id:
+            resp = requests.get(f"{SONARR_URL}/api/v3/series?tvdbId={tvdb_id}", headers=SONARR_HEADERS, timeout=30)
+            if resp.status_code == 200 and resp.json():
+                log(f"Series found by series-level TVDB ID {tvdb_id}")
+                return resp.json()[0]
+        if title:
+            resp = requests.get(f"{SONARR_URL}/api/v3/series", headers=SONARR_HEADERS, timeout=30)
+            if resp.status_code == 200:
+                for s in resp.json():
+                    if s['title'].lower() == title.lower():
+                        log(f"Series found by title match: '{s['title']}'")
+                        return s
+                log(f"No series found matching title '{title}'")
+    except Exception as e:
+        log(f"ERROR in find_series: {e}")
+        log(traceback.format_exc())
+    return None
+
 @app.route('/jellyfin', methods=['POST'])
 def jellyfin_webhook():
     try:
@@ -394,7 +453,7 @@ def jellyfin_webhook():
 
         repaired_body = json_repair(raw_body)
         if repaired_body != raw_body:
-            log("Applied ultimate JSON repair")
+            log("Applied JSON repair")
             log("Repaired version:")
             log(repaired_body)
 
@@ -474,25 +533,45 @@ def jellyfin_webhook():
                 log(f"Processing with series: '{series['title']}' (Sonarr ID: {series_id})")
 
                 if item_type == 'Series':
-                    log("Deleting entire series from Sonarr")
-                    del_resp = requests.delete(
-                        f"{SONARR_URL}/api/v3/series/{series_id}?deleteFiles=true&addImportExclusion=false",
-                        headers=SONARR_HEADERS,
-                        timeout=30
-                    )
-                    log(f"Series delete response: {del_resp.status_code}")
+                    log(f"Series deletion - Mode {SERIES_DELETION_MODE}")
+
+                    # Always delete files from all seasons
+                    files_resp = requests.get(f"{SONARR_URL}/api/v3/episodefile?seriesId={series_id}", headers=SONARR_HEADERS, timeout=30)
+                    deleted_count = 0
+                    if files_resp.status_code == 200:
+                        for file in files_resp.json():
+                            requests.delete(f"{SONARR_URL}/api/v3/episodefile/{file['id']}", headers=SONARR_HEADERS, timeout=30)
+                            deleted_count += 1
+                    log(f"Deleted {deleted_count} episode files")
+
+                    if SERIES_DELETION_MODE == 1:
+                        log("Mode 1: Safe - only files deleted")
+                    elif SERIES_DELETION_MODE == 2:
+                        log("Mode 2: Aggressive - full series removal")
+                        del_resp = requests.delete(
+                            f"{SONARR_URL}/api/v3/series/{series_id}?deleteFiles=true&addImportExclusion=false",
+                            headers=SONARR_HEADERS,
+                            timeout=30
+                        )
+                        log(f"Series fully removed from Sonarr (response: {del_resp.status_code})")
+                    elif SERIES_DELETION_MODE == 3:
+                        is_ended = series.get('status', '').lower() == 'ended'
+                        fully_downloaded = is_series_fully_downloaded(series)
+                        if is_ended and fully_downloaded:
+                            log("Mode 3: Show ended and fully downloaded - full removal")
+                            del_resp = requests.delete(
+                                f"{SONARR_URL}/api/v3/series/{series_id}?deleteFiles=true&addImportExclusion=false",
+                                headers=SONARR_HEADERS,
+                                timeout=30
+                            )
+                            log(f"Series fully removed from Sonarr (response: {del_resp.status_code})")
+                        else:
+                            log("Mode 3: Show continuing or incomplete - only files deleted")
 
                 elif item_type == 'Season':
-                    log(f"Processing Season {season_num} deletion")
-                    updated = False
-                    for s in series['seasons']:
-                        if s['seasonNumber'] == season_num and s['monitored']:
-                            s['monitored'] = False
-                            updated = True
-                    if updated:
-                        requests.put(f"{SONARR_URL}/api/v3/series/{series_id}", json=series, headers=SONARR_HEADERS, timeout=30)
-                        log(f"Season {season_num} unmonitored")
+                    log(f"Season {season_num} deletion - Mode {SEASON_DELETION_MODE}")
 
+                    # Always delete files from this season
                     files_resp = requests.get(f"{SONARR_URL}/api/v3/episodefile?seriesId={series_id}", headers=SONARR_HEADERS, timeout=30)
                     deleted_count = 0
                     if files_resp.status_code == 200:
@@ -501,7 +580,34 @@ def jellyfin_webhook():
                                 requests.delete(f"{SONARR_URL}/api/v3/episodefile/{file['id']}", headers=SONARR_HEADERS, timeout=30)
                                 deleted_count += 1
                     log(f"Deleted {deleted_count} episode files from season {season_num}")
-                    log("Season processed")
+
+                    if SEASON_DELETION_MODE == 1:
+                        log("Mode 1: Safe - only files deleted")
+                    elif SEASON_DELETION_MODE == 2:
+                        log("Mode 2: Aggressive - unmonitor entire season")
+                        updated = False
+                        for s in series['seasons']:
+                            if s['seasonNumber'] == season_num and s['monitored']:
+                                s['monitored'] = False
+                                updated = True
+                        if updated:
+                            requests.put(f"{SONARR_URL}/api/v3/series/{series_id}", json=series, headers=SONARR_HEADERS, timeout=30)
+                            log(f"Season {season_num} fully unmonitored")
+                    elif SEASON_DELETION_MODE == 3:
+                        fully_downloaded = is_season_fully_downloaded(series, season_num)
+                        # Simple heuristic: if all monitored episodes in season are downloaded, consider it "complete"
+                        if fully_downloaded:
+                            log("Mode 3: Season fully downloaded - unmonitor entire season")
+                            updated = False
+                            for s in series['seasons']:
+                                if s['seasonNumber'] == season_num and s['monitored']:
+                                    s['monitored'] = False
+                                    updated = True
+                            if updated:
+                                requests.put(f"{SONARR_URL}/api/v3/series/{series_id}", json=series, headers=SONARR_HEADERS, timeout=30)
+                                log(f"Season {season_num} fully unmonitored")
+                        else:
+                            log("Mode 3: Season incomplete - only files deleted")
 
                 elif item_type == 'Episode':
                     log(f"Processing Episode S{season_num}E{episode_num} deletion")
@@ -529,6 +635,7 @@ def jellyfin_webhook():
                     else:
                         log("No episode file to delete")
                     log("Episode processed")
+
             except Exception as e:
                 log(f"ERROR during TV item processing: {e}")
                 log(traceback.format_exc())
@@ -605,7 +712,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     try:
-        log("Jellyfin Sync Script starting - Version 2.4.0")
+        log("Jellyfin Sync Script starting - Version 3.0.0")
 
         init_database()
 

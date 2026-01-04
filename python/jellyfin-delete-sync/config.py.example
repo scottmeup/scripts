@@ -10,6 +10,18 @@ RADARR_API_KEY = 'your-radarr-api-key-here'
 LISTEN_HOST = '0.0.0.0'
 LISTEN_PORT = 5373
 
+# Deletion behavior for series
+# 1 = Safe: only delete files, leave monitoring alone
+# 2 = Aggressive: remove entire series from Sonarr
+# 3 = Smart: remove only if show has ended AND is fully downloaded
+SERIES_DELETION_MODE = 1  # or 2 or 3
+
+# Deletion behavior for seasons
+# 1 = Safe: only delete files from season
+# 2 = Aggressive: unmonitor entire season
+# 3 = Smart: unmonitor season only if complete and fully downloaded
+SEASON_DELETION_MODE = 1  # or 2 or 3
+
 # === Refresh Schedule Options ===
 # Choose ONE of the following:
 
