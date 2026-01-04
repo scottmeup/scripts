@@ -14,7 +14,7 @@
 #
 # Item Type:
 #	Movies
-# 	Episodes
+# Episodes
 #	Season
 #	Series
 #
@@ -30,17 +30,31 @@
   "NotificationType": "{{NotificationType}}",
   "Item": {
     "Type": "{{ItemType}}",
-    "Name": "{{Name}}",
-    "SeriesName": "{{SeriesName}}",
-    "SeasonNumber": {{SeasonNumber}},
-    "EpisodeNumber": {{EpisodeNumber}},
-    "Year": {{Year}},
-    "Overview": "{{Overview}}",
-    "ItemId": "{{ItemId}}",
-    "ProviderIds": {
-      "Tmdb": "{{Provider_tmdb}}",
-      "Tvdb": "{{Provider_tvdb}}",
+    "Name": "{{Name}}"
+    {{#if SeriesName}},
+    "SeriesName": "{{SeriesName}}"
+    {{/if}}
+    {{#if SeasonNumber}},
+    "SeasonNumber": {{SeasonNumber}}
+    {{/if}}
+    {{#if EpisodeNumber}},
+    "EpisodeNumber": {{EpisodeNumber}}
+    {{/if}}
+    ,"Year": {{Year}}
+    ,"Overview": "{{Overview}}"
+    ,"ItemId": "{{ItemId}}"
+    ,"ProviderIds": {
+      {{#if Provider_tmdb}}
+      "Tmdb": "{{Provider_tmdb}}"
+      {{/if}}
+      {{#if Provider_tvdb}}
+        {{#if Provider_tmdb}},{{/if}}
+      "Tvdb": "{{Provider_tvdb}}"
+      {{/if}}
+      {{#if Provider_imdb}}
+        {{#if Provider_tmdb}}{{#if Provider_tvdb}},{{else}},{{/if}}{{else}}{{#if Provider_tvdb}},{{/if}}{{/if}}
       "Imdb": "{{Provider_imdb}}"
+      {{/if}}
     }
   }
 }
