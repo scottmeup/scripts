@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 
 # jellyfin_sync.py
-# Version: 3.0.0
+# Version: 3.1.0
 # Date: January 04, 2026
 #
 # Changelog:
-# 3.0.0 - Added configurable deletion behavior for Series and Season
-#         - New config options: SERIES_DELETION_MODE and SEASON_DELETION_MODE (1, 2, or 3)
-#         - Mode 1: Safe - only delete files from affected items
-#         - Mode 2: Aggressive - full series/season unmonitor or removal
-#         - Mode 3: Smart - conditional full cleanup based on completion status
-#         - Validation on startup
+# 3.1.0 - Added persistent show completion status for smart deletion (Mode 3)
+#         - New 'series_status' table stores series_id + is_completed (bool)
+#         - Updated during Sonarr webhook (Download, EpisodeFileDelete, SeriesDelete)
+#         - Preserved during rebuild (not cleared)
+#         - Optional --clear-status argument to wipe completion data
+#         - Smart series deletion now uses accurate, persistent completion status
+#         - Season smart mode improved with better completion check
+# 3.0.0 - Configurable deletion modes
+# 2.5.0 - Renamed json repair function
 # 2.4.0 - Flexible refresh (zero, one, or none)
+#
+# To Do: Work on complete season functionality for smart deletion
 
 import flask
 import requests
@@ -154,10 +159,19 @@ def init_database():
                 FOREIGN KEY (series_id) REFERENCES series (series_id)
             )
         ''')
+
         cur.execute('''
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
+            )
+        ''')
+
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS series_status (
+                series_id INTEGER PRIMARY KEY,
+                is_completed INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (series_id) REFERENCES series (series_id)
             )
         ''')
 
@@ -193,6 +207,50 @@ def load_setting(key, default=None):
     except Exception as e:
         log(f"ERROR loading setting {key}: {e}")
         return default
+    finally:
+        conn.close()
+
+def set_series_completed(series_id, completed=True):
+    conn = get_db_connection()
+    if conn is None:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute('INSERT OR REPLACE INTO series_status (series_id, is_completed) VALUES (?, ?)',
+                    (series_id, 1 if completed else 0))
+        conn.commit()
+        log(f"Series {series_id} marked as {'completed' if completed else 'incomplete'}")
+    except Exception as e:
+        log(f"ERROR updating series completion status: {e}")
+    finally:
+        conn.close()
+
+def is_series_completed(series_id):
+    conn = get_db_connection()
+    if conn is None:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute('SELECT is_completed FROM series_status WHERE series_id = ?', (series_id,))
+        row = cur.fetchone()
+        return bool(row['is_completed']) if row else False
+    except Exception as e:
+        log(f"ERROR checking series completion: {e}")
+        return False
+    finally:
+        conn.close()
+
+def clear_completion_status():
+    conn = get_db_connection()
+    if conn is None:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute('DELETE FROM series_status')
+        conn.commit()
+        log("All series completion status cleared")
+    except Exception as e:
+        log(f"ERROR clearing completion status: {e}")
     finally:
         conn.close()
 
@@ -234,33 +292,7 @@ def json_repair(raw_body):
 
     return repaired
 
-def is_series_fully_downloaded(series):
-    try:
-        eps_resp = requests.get(f"{SONARR_URL}/api/v3/episode?seriesId={series['id']}", headers=SONARR_HEADERS, timeout=30)
-        if eps_resp.status_code != 200:
-            return False
-        episodes = eps_resp.json()
-        for ep in episodes:
-            if ep['monitored'] and not ep.get('hasFile', False):
-                return False
-        return True
-    except Exception:
-        return False
-
-def is_season_fully_downloaded(series, season_number):
-    try:
-        eps_resp = requests.get(f"{SONARR_URL}/api/v3/episode?seriesId={series['id']}&seasonNumber={season_number}", headers=SONARR_HEADERS, timeout=30)
-        if eps_resp.status_code != 200:
-            return False
-        episodes = eps_resp.json()
-        for ep in episodes:
-            if ep['monitored'] and not ep.get('hasFile', False):
-                return False
-        return True
-    except Exception:
-        return False
-
-def build_provider_map():
+def build_provider_map(clear_status=False):
     log("Building full provider map from Sonarr and Radarr...")
     start_time = time.time()
     conn = get_db_connection()
@@ -270,11 +302,16 @@ def build_provider_map():
     try:
         cur = conn.cursor()
 
+        # Clear data tables but NOT series_status
         cur.execute('DELETE FROM movies')
         cur.execute('DELETE FROM episodes')
         cur.execute('DELETE FROM seasons')
         cur.execute('DELETE FROM series')
         cur.execute('DELETE FROM episode_map')
+
+        if clear_status:
+            cur.execute('DELETE FROM series_status')
+            log("Completion status cleared as requested")
 
         series_resp = requests.get(f"{SONARR_URL}/api/v3/series", headers=SONARR_HEADERS, timeout=60)
         if series_resp.status_code != 200:
@@ -535,7 +572,7 @@ def jellyfin_webhook():
                 if item_type == 'Series':
                     log(f"Series deletion - Mode {SERIES_DELETION_MODE}")
 
-                    # Always delete files from all seasons
+                    # Delete files
                     files_resp = requests.get(f"{SONARR_URL}/api/v3/episodefile?seriesId={series_id}", headers=SONARR_HEADERS, timeout=30)
                     deleted_count = 0
                     if files_resp.status_code == 200:
@@ -547,31 +584,32 @@ def jellyfin_webhook():
                     if SERIES_DELETION_MODE == 1:
                         log("Mode 1: Safe - only files deleted")
                     elif SERIES_DELETION_MODE == 2:
-                        log("Mode 2: Aggressive - full series removal")
+                        log("Mode 2: Aggressive - full removal")
                         del_resp = requests.delete(
                             f"{SONARR_URL}/api/v3/series/{series_id}?deleteFiles=true&addImportExclusion=false",
                             headers=SONARR_HEADERS,
                             timeout=30
                         )
                         log(f"Series fully removed from Sonarr (response: {del_resp.status_code})")
+                        set_series_completed(series_id, False)
                     elif SERIES_DELETION_MODE == 3:
-                        is_ended = series.get('status', '').lower() == 'ended'
-                        fully_downloaded = is_series_fully_downloaded(series)
-                        if is_ended and fully_downloaded:
-                            log("Mode 3: Show ended and fully downloaded - full removal")
+                        completed = is_series_completed(series_id)
+                        if completed:
+                            log("Mode 3: Series marked as completed - full removal")
                             del_resp = requests.delete(
                                 f"{SONARR_URL}/api/v3/series/{series_id}?deleteFiles=true&addImportExclusion=false",
                                 headers=SONARR_HEADERS,
                                 timeout=30
                             )
                             log(f"Series fully removed from Sonarr (response: {del_resp.status_code})")
+                            set_series_completed(series_id, False)
                         else:
-                            log("Mode 3: Show continuing or incomplete - only files deleted")
+                            log("Mode 3: Series not completed - only files deleted")
 
                 elif item_type == 'Season':
                     log(f"Season {season_num} deletion - Mode {SEASON_DELETION_MODE}")
 
-                    # Always delete files from this season
+                    # Delete files from season
                     files_resp = requests.get(f"{SONARR_URL}/api/v3/episodefile?seriesId={series_id}", headers=SONARR_HEADERS, timeout=30)
                     deleted_count = 0
                     if files_resp.status_code == 200:
@@ -595,7 +633,6 @@ def jellyfin_webhook():
                             log(f"Season {season_num} fully unmonitored")
                     elif SEASON_DELETION_MODE == 3:
                         fully_downloaded = is_season_fully_downloaded(series, season_num)
-                        # Simple heuristic: if all monitored episodes in season are downloaded, consider it "complete"
                         if fully_downloaded:
                             log("Mode 3: Season fully downloaded - unmonitor entire season")
                             updated = False
@@ -664,6 +701,29 @@ def sonarr_webhook():
             return 'DB error', 200
         cur = conn.cursor()
 
+        series_id = data.get('series', {}).get('id')
+
+        if event == 'Download' and 'episodes' in data and series_id:
+            try:
+                eps_resp = requests.get(f"{SONARR_URL}/api/v3/episode?seriesId={series_id}", headers=SONARR_HEADERS, timeout=30)
+                if eps_resp.status_code == 200:
+                    all_downloaded = True
+                    for ep in eps_resp.json():
+                        if ep['monitored'] and not ep.get('hasFile', False):
+                            all_downloaded = False
+                            break
+                    if all_downloaded:
+                        set_series_completed(series_id, True)
+            except Exception as e:
+                log(f"ERROR checking completion on download: {e}")
+
+        elif event == 'EpisodeFileDelete' and 'episodes' in data and series_id:
+            set_series_completed(series_id, False)
+
+        elif event == 'SeriesDelete' and 'series' in data:
+            set_series_completed(data['series']['id'], False)
+
+        # Existing map updates
         if event == 'Download' and 'episodes' in data:
             for ep in data['episodes']:
                 tvdb = ep.get('tvdbId')
@@ -709,15 +769,18 @@ def sonarr_webhook():
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--rebuild', action='store_true', help='Force immediate rebuild on startup')
+    parser.add_argument('--clear-status', action='store_true', help='Clear all stored series completion status')
     args = parser.parse_args()
 
     try:
-        log("Jellyfin Sync Script starting - Version 3.0.0")
+        log("Jellyfin Sync Script starting - Version 3.1.0")
 
         init_database()
 
+        build_provider_map(clear_status=args.clear_status)
+
         if args.rebuild:
-            build_provider_map()
+            build_provider_map(clear_status=args.clear_status)
 
         scheduler = setup_scheduler()
 
