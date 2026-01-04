@@ -1,4 +1,5 @@
-# fill the details, save this file as config.py and place it in the same directory as the main script
+# config.py
+# Example configuration for jellyfin_sync.py
 
 SONARR_URL = 'http://localhost:8989'
 SONARR_API_KEY = 'your-sonarr-api-key-here'
@@ -9,6 +10,18 @@ RADARR_API_KEY = 'your-radarr-api-key-here'
 LISTEN_HOST = '0.0.0.0'
 LISTEN_PORT = 5373
 
-# Optional: Auto-rebuild episode map every N minutes
-# Set to None to disable, or e.g. 1440 for once per day, 60 for hourly
-REBUILD_INTERVAL_MINUTES = None   # Change to 1440 or any number > 0 to enable
+# === Refresh Schedule Options ===
+# Choose ONE of the following:
+
+# Option 1: Simple interval in minutes (e.g., every 24 hours)
+REFRESH_INTERVAL_MINUTES = 1440  # Daily refresh
+REFRESH_SCHEDULE = None
+
+# Option 2: List of specific day + time schedules
+# Days: 'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun' or '*' for every day
+# REFRESH_INTERVAL_MINUTES = None
+# REFRESH_SCHEDULE = [
+#     {'day': 'mon', 'hour': 3, 'minute': 0},     # Every Monday at 3:00 AM
+#     {'day': 'thu', 'hour': 3, 'minute': 30},    # Every Thursday at 3:30 AM
+#     {'day': '*',   'hour': 4, 'minute': 0},     # Every day at 4:00 AM
+# ]

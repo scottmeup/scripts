@@ -1,40 +1,80 @@
 #!/usr/bin/env python3
 
 # jellyfin_sync.py
-# Version: 1.11.0
+# Version: 2.4.0
 # Date: January 04, 2026
 #
 # Changelog:
-# 1.11.0 - Added comprehensive try/except error handling throughout critical sections
-#          - All external API calls (Sonarr/Radarr) wrapped in try/except
-#          - JSON repair and parsing protected
-#          - Database operations protected
-#          - Webhook processing wrapped in outer try/except
-#          - All exceptions logged to console with full traceback
-# 1.10.0 - Fixed IndexError in repair function
-# 1.9.0 - Line-by-line repair
+# 2.4.0 - Updated refresh schedule validation
+#         - Now allows REFRESH_INTERVAL_MINUTES or REFRESH_SCHEDULE to be unset (None)
+#         - Allows exactly zero or one to be set
+#         - Disallows both being set at the same time
+#         - No automatic refresh if both are None (optional refresh)
+#         - Clear error message if both are defined
+# 2.3.0 - Fixed missing json_repair function
+# 2.2.0 - Safe config import with getattr
 
 import flask
 import requests
 import json
 import sqlite3
 import argparse
-import threading
 import time
 import re
 import traceback
 from datetime import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 try:
-    from config import (
-        SONARR_URL, SONARR_API_KEY,
-        RADARR_URL, RADARR_API_KEY,
-        LISTEN_HOST, LISTEN_PORT,
-        REBUILD_INTERVAL_MINUTES
-    )
-except ImportError:
-    print("ERROR: Could not import config.py - create it in the same directory with your settings!")
+    import config
+    SONARR_URL = config.SONARR_URL
+    SONARR_API_KEY = config.SONARR_API_KEY
+    RADARR_URL = config.RADARR_URL
+    RADARR_API_KEY = config.RADARR_API_KEY
+    LISTEN_HOST = config.LISTEN_HOST
+    LISTEN_PORT = config.LISTEN_PORT
+    REFRESH_INTERVAL_MINUTES = getattr(config, 'REFRESH_INTERVAL_MINUTES', None)
+    REFRESH_SCHEDULE = getattr(config, 'REFRESH_SCHEDULE', None)
+except ImportError as e:
+    print("ERROR: Could not import config.py")
+    print("Make sure config.py exists in the same directory and contains all required settings.")
+    print(f"Import error: {e}")
     exit(1)
+except AttributeError as e:
+    print("ERROR: Missing required setting in config.py")
+    print(f"Missing: {e}")
+    exit(1)
+
+# Validate refresh schedule: allow zero or one, but not both
+if REFRESH_INTERVAL_MINUTES is not None and REFRESH_SCHEDULE is not None:
+    print("ERROR: Invalid refresh schedule configuration in config.py")
+    print("You cannot define both REFRESH_INTERVAL_MINUTES and REFRESH_SCHEDULE at the same time.")
+    print("")
+    print("Current values:")
+    print(f"  REFRESH_INTERVAL_MINUTES = {REFRESH_INTERVAL_MINUTES}")
+    print(f"  REFRESH_SCHEDULE = {REFRESH_SCHEDULE}")
+    print("")
+    print("Choose one or neither (no automatic refresh if both are None).")
+    exit(1)
+
+# Optional additional validation if one is set
+if REFRESH_INTERVAL_MINUTES is not None:
+    if not isinstance(REFRESH_INTERVAL_MINUTES, int) or REFRESH_INTERVAL_MINUTES <= 0:
+        print("ERROR: REFRESH_INTERVAL_MINUTES must be a positive integer if defined")
+        print(f"Current value: {REFRESH_INTERVAL_MINUTES}")
+        exit(1)
+
+if REFRESH_SCHEDULE is not None:
+    if not isinstance(REFRESH_SCHEDULE, list) or len(REFRESH_SCHEDULE) == 0:
+        print("ERROR: REFRESH_SCHEDULE must be a non-empty list if defined")
+        print(f"Current value: {REFRESH_SCHEDULE}")
+        exit(1)
+    for i, sched in enumerate(REFRESH_SCHEDULE):
+        if not isinstance(sched, dict):
+            print(f"ERROR: REFRESH_SCHEDULE item {i} must be a dictionary")
+            exit(1)
 
 app = flask.Flask(__name__)
 
@@ -56,69 +96,154 @@ def get_db_connection():
         log(traceback.format_exc())
         return None
 
-def upgrade_database_schema(conn):
+def init_database():
+    conn = get_db_connection()
     if conn is None:
         return
     try:
         cur = conn.cursor()
-        cur.execute("PRAGMA table_info(seasons)")
-        columns = [col[1] for col in cur.fetchall()]
-        if 'tvdb_id' not in columns:
-            log("Upgrading seasons table: adding tvdb_id")
-            cur.execute("ALTER TABLE seasons ADD COLUMN tvdb_id INTEGER")
-        if 'tmdb_id' not in columns:
-            log("Upgrading seasons table: adding tmdb_id")
-            cur.execute("ALTER TABLE seasons ADD COLUMN tmdb_id INTEGER")
-        if 'imdb_id' not in columns:
-            log("Upgrading seasons table: adding imdb_id")
-            cur.execute("ALTER TABLE seasons ADD COLUMN imdb_id TEXT")
+
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS series (
+                series_id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                tvdb_id INTEGER,
+                tmdb_id INTEGER,
+                imdb_id TEXT
+            )
+        ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS seasons (
+                series_id INTEGER,
+                season_number INTEGER,
+                tvdb_id INTEGER,
+                tmdb_id INTEGER,
+                imdb_id TEXT,
+                PRIMARY KEY (series_id, season_number),
+                FOREIGN KEY (series_id) REFERENCES series (series_id)
+            )
+        ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS episodes (
+                episode_id INTEGER PRIMARY KEY,
+                series_id INTEGER NOT NULL,
+                season_number INTEGER NOT NULL,
+                episode_number INTEGER NOT NULL,
+                tvdb_id INTEGER,
+                tmdb_id INTEGER,
+                imdb_id TEXT,
+                FOREIGN KEY (series_id) REFERENCES series (series_id),
+                FOREIGN KEY (series_id, season_number) REFERENCES seasons (series_id, season_number)
+            )
+        ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS movies (
+                movie_id INTEGER PRIMARY KEY,
+                title TEXT NOT NULL,
+                tmdb_id INTEGER,
+                imdb_id TEXT
+            )
+        ''')
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS episode_map (
+                episode_tvdb_id TEXT PRIMARY KEY,
+                series_id INTEGER NOT NULL,
+                FOREIGN KEY (series_id) REFERENCES series (series_id)
+            )
+        ''')
+
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        ''')
+
         conn.commit()
     except Exception as e:
-        log(f"ERROR upgrading database schema: {e}")
+        log(f"ERROR initializing database: {e}")
         log(traceback.format_exc())
+    finally:
+        conn.close()
 
-def ultimate_json_repair(raw_body):
+def save_setting(key, value):
+    conn = get_db_connection()
+    if conn is None:
+        return
     try:
-        lines = raw_body.splitlines()
-        repaired_lines = []
-        last_was_value = False
+        cur = conn.cursor()
+        cur.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', (key, str(value)))
+        conn.commit()
+    except Exception as e:
+        log(f"ERROR saving setting {key}: {e}")
+        log(traceback.format_exc())
+    finally:
+        conn.close()
 
-        for line in lines:
-            stripped = line.strip()
-            if not stripped:
-                continue
+def load_setting(key, default=None):
+    conn = get_db_connection()
+    if conn is None:
+        return default
+    try:
+        cur = conn.cursor()
+        cur.execute('SELECT value FROM settings WHERE key = ?', (key,))
+        row = cur.fetchone()
+        return row['value'] if row else default
+    except Exception as e:
+        log(f"ERROR loading setting {key}: {e}")
+        log(traceback.format_exc())
+        return default
+    finally:
+        conn.close()
 
-            if last_was_value and stripped.startswith('"') and ':' in stripped:
-                if repaired_lines:
-                    repaired_lines[-1] = repaired_lines[-1].rstrip() + ','
+def json_repair(raw_body):
+    """Ultimate line-by-line repair for the most broken Jellyfin JSON - now safe from IndexError"""
+    lines = raw_body.splitlines()
+    repaired_lines = []
+    last_was_value = False
 
-            line = re.sub(r':\s*,', ': null,', line)
-            line = re.sub(r',\s*"[\w]+":\s*$', '', line)
-            line = re.sub(r'\s*"[\w]+":\s*$', '', line)
+    for line in lines:
+        stripped = line.strip()
 
-            repaired_lines.append(line)
+        # Skip completely empty lines
+        if not stripped:
+            continue
 
-            if len(stripped) > 0:
-                last_char = stripped[-1]
-                if last_char in ('"', '}', ']', 'l', 'e') or last_char.isdigit():
-                    last_was_value = True
-                else:
-                    last_was_value = False
+        # If previous line ended with a value and current line starts with a key, add comma to previous
+        if last_was_value and stripped.startswith('"') and ':' in stripped:
+            if repaired_lines:
+                repaired_lines[-1] = repaired_lines[-1].rstrip() + ','
+
+        # Fix empty values ": ,"
+        line = re.sub(r':\s*,', ': null,', line)
+
+        # Remove stray incomplete keys like "Dummy":
+        line = re.sub(r',\s*"[\w]+":\s*$', '', line)
+        line = re.sub(r'\s*"[\w]+":\s*$', '', line)
+
+        repaired_lines.append(line)
+
+        # Determine if this line ends with a value - safely
+        if len(stripped) > 0:
+            last_char = stripped[-1]
+            if last_char in ('"', '}', ']', 'l', 'e') or last_char.isdigit():
+                last_was_value = True
             else:
                 last_was_value = False
+        else:
+            last_was_value = False
 
-        repaired = '\n'.join(repaired_lines)
-        repaired = re.sub(r',\s*}', '}', repaired)
-        repaired = re.sub(r',\s*]', ']', repaired)
+    repaired = '\n'.join(repaired_lines)
 
-        if not repaired.endswith('}'):
-            repaired += '}'
+    # Final cleanup: remove trailing commas before } or ]
+    repaired = re.sub(r',\s*}', '}', repaired)
+    repaired = re.sub(r',\s*]', ']', repaired)
 
-        return repaired
-    except Exception as e:
-        log(f"ERROR in JSON repair function: {e}")
-        log(traceback.format_exc())
-        return raw_body  # Return original on failure
+    # Ensure it ends with }
+    if not repaired.endswith('}'):
+        repaired += '}'
+
+    return repaired
 
 def build_provider_map():
     log("Building full provider map from Sonarr and Radarr...")
@@ -136,7 +261,7 @@ def build_provider_map():
         cur.execute('DELETE FROM series')
         cur.execute('DELETE FROM episode_map')
 
-        series_resp = requests.get(f"{SONARR_URL}/api/v3/series", headers=SONARR_HEADERS, timeout=30)
+        series_resp = requests.get(f"{SONARR_URL}/api/v3/series", headers=SONARR_HEADERS, timeout=60)
         if series_resp.status_code != 200:
             log(f"ERROR: Failed to fetch series from Sonarr ({series_resp.status_code})")
             conn.close()
@@ -145,77 +270,71 @@ def build_provider_map():
         series_list = series_resp.json()
         series_count = season_count = episode_count = 0
         for ser in series_list:
-            try:
-                series_id = ser['id']
-                title = ser['title']
-                tvdb = ser.get('tvdbId')
-                tmdb = None
-                imdb = ser.get('imdbId')
+            series_id = ser['id']
+            title = ser['title']
+            tvdb = ser.get('tvdbId')
+            tmdb = None
+            imdb = ser.get('imdbId')
 
+            cur.execute(
+                'INSERT INTO series (series_id, title, tvdb_id, tmdb_id, imdb_id) VALUES (?, ?, ?, ?, ?)',
+                (series_id, title, tvdb, tmdb, imdb)
+            )
+            series_count += 1
+
+            for season in ser.get('seasons', []):
+                season_num = season['seasonNumber']
                 cur.execute(
-                    'INSERT INTO series (series_id, title, tvdb_id, tmdb_id, imdb_id) VALUES (?, ?, ?, ?, ?)',
-                    (series_id, title, tvdb, tmdb, imdb)
+                    'INSERT INTO seasons (series_id, season_number, tvdb_id, tmdb_id, imdb_id) VALUES (?, ?, ?, ?, ?)',
+                    (series_id, season_num, None, None, None)
                 )
-                series_count += 1
+                season_count += 1
 
-                for season in ser.get('seasons', []):
-                    season_num = season['seasonNumber']
+            eps_resp = requests.get(f"{SONARR_URL}/api/v3/episode?seriesId={series_id}", headers=SONARR_HEADERS, timeout=60)
+            if eps_resp.status_code == 200:
+                for ep in eps_resp.json():
+                    ep_id = ep['id']
+                    season_num = ep['seasonNumber']
+                    ep_num = ep['episodeNumber']
+                    ep_tvdb = ep.get('tvdbId')
+                    ep_tmdb = None
+                    ep_imdb = ep.get('imdbId')
+
                     cur.execute(
-                        'INSERT INTO seasons (series_id, season_number, tvdb_id, tmdb_id, imdb_id) VALUES (?, ?, ?, ?, ?)',
-                        (series_id, season_num, None, None, None)
+                        'INSERT INTO episodes (episode_id, series_id, season_number, episode_number, tvdb_id, tmdb_id, imdb_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                        (ep_id, series_id, season_num, ep_num, ep_tvdb, ep_tmdb, ep_imdb)
                     )
-                    season_count += 1
+                    episode_count += 1
 
-                eps_resp = requests.get(f"{SONARR_URL}/api/v3/episode?seriesId={series_id}", headers=SONARR_HEADERS, timeout=30)
-                if eps_resp.status_code == 200:
-                    for ep in eps_resp.json():
-                        ep_id = ep['id']
-                        season_num = ep['seasonNumber']
-                        ep_num = ep['episodeNumber']
-                        ep_tvdb = ep.get('tvdbId')
-                        ep_tmdb = None
-                        ep_imdb = ep.get('imdbId')
-
+                    if ep_tvdb:
                         cur.execute(
-                            'INSERT INTO episodes (episode_id, series_id, season_number, episode_number, tvdb_id, tmdb_id, imdb_id) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                            (ep_id, series_id, season_num, ep_num, ep_tvdb, ep_tmdb, ep_imdb)
+                            'INSERT OR IGNORE INTO episode_map (episode_tvdb_id, series_id) VALUES (?, ?)',
+                            (str(ep_tvdb), series_id)
                         )
-                        episode_count += 1
 
-                        if ep_tvdb:
-                            cur.execute(
-                                'INSERT OR IGNORE INTO episode_map (episode_tvdb_id, series_id) VALUES (?, ?)',
-                                (str(ep_tvdb), series_id)
-                            )
-            except Exception as e:
-                log(f"ERROR processing series {ser.get('title', 'unknown')}: {e}")
-                log(traceback.format_exc())
-                continue
-
-        movies_resp = requests.get(f"{RADARR_URL}/api/v3/movie", headers=RADARR_HEADERS, timeout=30)
+        movies_resp = requests.get(f"{RADARR_URL}/api/v3/movie", headers=RADARR_HEADERS, timeout=60)
         if movies_resp.status_code != 200:
             log(f"ERROR: Failed to fetch movies from Radarr ({movies_resp.status_code})")
         else:
             movie_count = 0
             for movie in movies_resp.json():
-                try:
-                    movie_id = movie['id']
-                    title = movie['title']
-                    tmdb = movie.get('tmdbId')
-                    imdb = movie.get('imdbId')
+                movie_id = movie['id']
+                title = movie['title']
+                tmdb = movie.get('tmdbId')
+                imdb = movie.get('imdbId')
 
-                    cur.execute(
-                        'INSERT INTO movies (movie_id, title, tmdb_id, imdb_id) VALUES (?, ?, ?, ?)',
-                        (movie_id, title, tmdb, imdb)
-                    )
-                    movie_count += 1
-                except Exception as e:
-                    log(f"ERROR processing movie {movie.get('title', 'unknown')}: {e}")
-                    log(traceback.format_exc())
+                cur.execute(
+                    'INSERT INTO movies (movie_id, title, tmdb_id, imdb_id) VALUES (?, ?, ?, ?)',
+                    (movie_id, title, tmdb, imdb)
+                )
+                movie_count += 1
 
         conn.commit()
         duration = time.time() - start_time
         log(f"Provider map built: {series_count} series, {season_count} seasons, {episode_count} episodes, {movie_count} movies in {duration:.1f}s")
+
+        save_setting('last_refresh', datetime.now().isoformat())
+
     except Exception as e:
         log(f"CRITICAL ERROR in build_provider_map: {e}")
         log(traceback.format_exc())
@@ -225,63 +344,42 @@ def build_provider_map():
         except:
             pass
 
-def periodic_rebuild():
-    if not REBUILD_INTERVAL_MINUTES or REBUILD_INTERVAL_MINUTES <= 0:
-        return
-    interval_seconds = REBUILD_INTERVAL_MINUTES * 60
-    log(f"Scheduled automatic rebuild every {REBUILD_INTERVAL_MINUTES} minutes")
-    while True:
-        time.sleep(interval_seconds)
-        try:
-            log("Scheduled rebuild started")
-            build_provider_map()
-        except Exception as e:
-            log(f"ERROR in scheduled rebuild: {e}")
-            log(traceback.format_exc())
+def setup_scheduler():
+    scheduler = BackgroundScheduler()
+    scheduler.start()
 
-def find_series_via_map(episode_tvdb_id):
-    conn = get_db_connection()
-    if conn is None:
-        return None
-    try:
-        cur = conn.cursor()
-        cur.execute('SELECT series_id FROM episode_map WHERE episode_tvdb_id = ?', (episode_tvdb_id,))
-        row = cur.fetchone()
-        if row:
-            series_id = row['series_id']
-            log(f"Map hit: episode TVDB {episode_tvdb_id} → series ID {series_id}")
-            resp = requests.get(f"{SONARR_URL}/api/v3/series/{series_id}", headers=SONARR_HEADERS, timeout=30)
-            if resp.status_code == 200:
-                return resp.json()
-    except Exception as e:
-        log(f"ERROR in find_series_via_map: {e}")
-        log(traceback.format_exc())
-    finally:
-        try:
-            conn.close()
-        except:
-            pass
-    return None
+    has_refresh = False
 
-def find_series(tvdb_id=None, title=None):
-    try:
-        if tvdb_id:
-            resp = requests.get(f"{SONARR_URL}/api/v3/series?tvdbId={tvdb_id}", headers=SONARR_HEADERS, timeout=30)
-            if resp.status_code == 200 and resp.json():
-                log(f"Series found by series-level TVDB ID {tvdb_id}")
-                return resp.json()[0]
-        if title:
-            resp = requests.get(f"{SONARR_URL}/api/v3/series", headers=SONARR_HEADERS, timeout=30)
-            if resp.status_code == 200:
-                for s in resp.json():
-                    if s['title'].lower() == title.lower():
-                        log(f"Series found by title match: '{s['title']}'")
-                        return s
-                log(f"No series found matching title '{title}'")
-    except Exception as e:
-        log(f"ERROR in find_series: {e}")
-        log(traceback.format_exc())
-    return None
+    if REFRESH_INTERVAL_MINUTES is not None:
+        log(f"Configured interval refresh every {REFRESH_INTERVAL_MINUTES} minutes")
+        scheduler.add_job(
+            build_provider_map,
+            IntervalTrigger(minutes=REFRESH_INTERVAL_MINUTES),
+            id='interval_refresh',
+            replace_existing=True
+        )
+        has_refresh = True
+
+    if REFRESH_SCHEDULE is not None:
+        log(f"Configured {len(REFRESH_SCHEDULE)} scheduled refresh time(s)")
+        for i, sched in enumerate(REFRESH_SCHEDULE):
+            day = sched.get('day', '*').lower()
+            hour = sched.get('hour', 3)
+            minute = sched.get('minute', 0)
+
+            scheduler.add_job(
+                build_provider_map,
+                CronTrigger(day_of_week=day, hour=hour, minute=minute),
+                id=f'scheduled_refresh_{i}',
+                replace_existing=True
+            )
+            log(f"  - {day.title() if day != '*' else 'Every day'} at {hour:02d}:{minute:02d}")
+        has_refresh = True
+
+    if not has_refresh:
+        log("No automatic refresh configured (both REFRESH_INTERVAL_MINUTES and REFRESH_SCHEDULE are None)")
+
+    return scheduler
 
 @app.route('/jellyfin', methods=['POST'])
 def jellyfin_webhook():
@@ -294,7 +392,7 @@ def jellyfin_webhook():
         log("=== RAW JELLYFIN WEBHOOK RECEIVED ===")
         log(raw_body)
 
-        repaired_body = ultimate_json_repair(raw_body)
+        repaired_body = json_repair(raw_body)
         if repaired_body != raw_body:
             log("Applied ultimate JSON repair")
             log("Repaired version:")
@@ -306,15 +404,15 @@ def jellyfin_webhook():
             log("JSON parsed successfully after repair")
         except json.JSONDecodeError as e:
             log(f"FINAL JSON PARSE FAILURE: {e}")
-            log("Payload too malformed to process - ignoring event but returning 200 to prevent retries")
+            log("Payload too malformed - ignoring but returning 200")
 
         if data:
-            log("=== PARSED PAYLOAD (best effort) ===")
+            log("=== PARSED PAYLOAD ===")
             log(json.dumps(data, indent=2))
 
         notification_type = data.get('NotificationType') if data else None
         if notification_type != 'ItemDeleted':
-            log(f"Ignored event type: {notification_type or 'unknown/severe malformation'}")
+            log(f"Ignored event type: {notification_type or 'unknown/malformed'}")
             return 'OK (ignored)', 200
 
         item = data.get('Item', {}) if data else {}
@@ -442,9 +540,9 @@ def jellyfin_webhook():
         return 'OK', 200
 
     except Exception as e:
-        log("CRITICAL UNHANDLED ERROR in webhook processing:")
+        log("CRITICAL UNHANDLED ERROR in /jellyfin webhook:")
         log(traceback.format_exc())
-        return 'OK (error handled)', 200  # Always return 200 to prevent retries
+        return 'OK (error handled)', 200
 
 @app.route('/sonarr', methods=['POST'])
 def sonarr_webhook():
@@ -503,94 +601,23 @@ def sonarr_webhook():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--rebuild', action='store_true', help='Force rebuild of provider map on startup')
+    parser.add_argument('--rebuild', action='store_true', help='Force immediate rebuild on startup')
     args = parser.parse_args()
 
     try:
-        log("Jellyfin Sync Script starting - Version 1.11.0")
+        log("Jellyfin Sync Script starting - Version 2.4.0")
 
-        conn = get_db_connection()
-        if conn is None:
-            print("FATAL: Could not open database. Exiting.")
-            exit(1)
-
-        cur = conn.cursor()
-
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS series (
-                series_id INTEGER PRIMARY KEY,
-                title TEXT NOT NULL,
-                tvdb_id INTEGER,
-                tmdb_id INTEGER,
-                imdb_id TEXT
-            )
-        ''')
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS seasons (
-                series_id INTEGER,
-                season_number INTEGER,
-                tvdb_id INTEGER,
-                tmdb_id INTEGER,
-                imdb_id TEXT,
-                PRIMARY KEY (series_id, season_number),
-                FOREIGN KEY (series_id) REFERENCES series (series_id)
-            )
-        ''')
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS episodes (
-                episode_id INTEGER PRIMARY KEY,
-                series_id INTEGER NOT NULL,
-                season_number INTEGER NOT NULL,
-                episode_number INTEGER NOT NULL,
-                tvdb_id INTEGER,
-                tmdb_id INTEGER,
-                imdb_id TEXT,
-                FOREIGN KEY (series_id) REFERENCES series (series_id),
-                FOREIGN KEY (series_id, season_number) REFERENCES seasons (series_id, season_number)
-            )
-        ''')
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS movies (
-                movie_id INTEGER PRIMARY KEY,
-                title TEXT NOT NULL,
-                tmdb_id INTEGER,
-                imdb_id TEXT
-            )
-        ''')
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS episode_map (
-                episode_tvdb_id TEXT PRIMARY KEY,
-                series_id INTEGER NOT NULL,
-                FOREIGN KEY (series_id) REFERENCES series (series_id)
-            )
-        ''')
-
-        upgrade_database_schema(conn)
-        conn.commit()
-        conn.close()
+        init_database()
 
         if args.rebuild:
             build_provider_map()
-        else:
-            conn = get_db_connection()
-            if conn:
-                cur = conn.cursor()
-                cur.execute('SELECT COUNT(*) FROM series')
-                if cur.fetchone()[0] == 0:
-                    conn.close()
-                    build_provider_map()
-                else:
-                    conn.close()
-                    log("Existing provider map loaded")
 
-        if REBUILD_INTERVAL_MINUTES and REBUILD_INTERVAL_MINUTES > 0:
-            thread = threading.Thread(target=periodic_rebuild, daemon=True)
-            thread.start()
+        scheduler = setup_scheduler()
 
         log(f"Server listening on http://{LISTEN_HOST}:{LISTEN_PORT}")
         log("Endpoints: /jellyfin (Jellyfin) | /sonarr (Sonarr updates)")
         app.run(host=LISTEN_HOST, port=LISTEN_PORT, debug=False)
     except Exception as e:
-        print("FATAL ERROR during startup:")
-        print(traceback.format_exc())
+        log("FATAL ERROR during startup:")
+        log(traceback.format_exc())
         exit(1)
