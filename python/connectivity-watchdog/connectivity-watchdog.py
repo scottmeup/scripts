@@ -33,25 +33,51 @@ def enable_tcp_keepalive(sock: socket.socket):
 # ======================
 # MQTT connections
 # ======================
-def start_mqtt(name, host, port):
-    def on_connect(client, userdata, flags, rc):
-        print(f"[MQTT:{name}] connected (rc={rc})")
+#def start_mqtt(name, host, port):
+#    def on_connect(client, userdata, flags, rc):
+#        print(f"[MQTT:{name}] connected (rc={rc})")
 
-    def on_disconnect(client, userdata, rc):
-        print(f"[MQTT:{name}] disconnected (rc={rc})")
+#    def on_disconnect(client, userdata, rc):
+#        print(f"[MQTT:{name}] disconnected (rc={rc})")
 
-    client = mqtt.Client(client_id=f"watchdog-{name}-{int(time.time())}")
-    client.on_connect = on_connect
-    client.on_disconnect = on_disconnect
+#    client = mqtt.Client(client_id=f"watchdog-{name}-{int(time.time())}")
+#    client.on_connect = on_connect
+#    client.on_disconnect = on_disconnect
 
-    client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
-    client.connect_async(host, port, keepalive=30)
+#    client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+#    client.connect_async(host, port, keepalive=30)
 
     # Patch socket after creation
+#    def on_socket_open(client, userdata, sock):
+#        enable_tcp_keepalive(sock)
+
+#    client.on_socket_open = on_socket_open
+
+#    client.loop_start()
+#    return client
+def start_mqtt(name, host, port):
+    def on_connect(client, userdata, flags, reasonCode, properties):
+        print(f"[MQTT:{name}] connected ({reasonCode})")
+
+    def on_disconnect(client, userdata, reasonCode, properties):
+        print(f"[MQTT:{name}] disconnected ({reasonCode})")
+
     def on_socket_open(client, userdata, sock):
         enable_tcp_keepalive(sock)
 
+    client = mqtt.Client(
+        client_id=f"watchdog-{name}-{int(time.time())}",
+        protocol=mqtt.MQTTv5,
+        #callback_api_version=mqtt.CallbackAPIVersion.V5,
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2
+    )
+
+    client.on_connect = on_connect
+    client.on_disconnect = on_disconnect
     client.on_socket_open = on_socket_open
+
+    client.tls_set(cert_reqs=ssl.CERT_REQUIRED)
+    client.connect_async(host, port, keepalive=30)
 
     client.loop_start()
     return client
@@ -61,7 +87,7 @@ def start_mqtt(name, host, port):
 # WebSocket connection
 # ======================
 async def websocket_task():
-    uri = "wss://echo.websocket.events"
+    uri = "wss://echo.websocket.org"
 
     ssl_ctx = ssl.create_default_context()
 
@@ -105,23 +131,27 @@ def netlink_monitor():
                 print(f"[NETLINK] neighbor event: {event}")
 
 
+
 # ======================
 # Main
 # ======================
-def main():
-    # Start MQTT connections
+async def main():
+    # Start Netlink thread
+    threading.Thread(target=netlink_monitor, daemon=True).start()
+
+    # Start MQTT connections (simultaneous)
     mqtt_clients = [
+        start_mqtt("freemqtt", "broker.freemqtt.com", 8883),
         start_mqtt("emqx", "broker.emqx.io", 8883),
         start_mqtt("mosquitto", "test.mosquitto.org", 8883),
     ]
 
-    # Start netlink monitor thread
-    t = threading.Thread(target=netlink_monitor, daemon=True)
-    t.start()
+    # Allow TLS handshakes to overlap
+    await asyncio.sleep(2)
 
-    # Start websocket loop
-    asyncio.run(websocket_task())
+    # Run websocket forever
+    await websocket_task()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
