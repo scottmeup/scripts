@@ -5,72 +5,54 @@ set -x
 # Parameters
 MAX_GAP_SECONDS=3600   # 1 hour
 MIN_AGE_SECONDS=7200   # 2 hours
-SOURCE_DIR="/foo"
-REFERENCE_FILE="/foo/.dir_monitor_timestamp_mov"
-OUTPUT_DIR="/bar"
+SOURCE_DIR="/mnt/sdc1/temp/cycle_videos"
+OUTPUT_DIR="/mnt/sdc1/temp/joined_cycle_videos"
+FILENAME_TIMESTAMP_FORMAT="%Y_%m%d_%H%M%S"  # Format: YYYY_MMDD_HHMMSS (e.g., 2025_0630_224951)
 
 # Ensure output directory exists
 mkdir -p "$OUTPUT_DIR"
 
-# Create reference timestamp file if missing
-if [ ! -f "$REFERENCE_FILE" ]; then
-    touch -d "2 hours ago" "$REFERENCE_FILE"
-    echo "Created reference file: $REFERENCE_FILE"
-fi
-
-# Get reference time
-ref_time=$(stat -c %Y "$REFERENCE_FILE")
-
 # Get current UNIX time
 now=$(date +%s)
 
-# Get current year
-current_year=$(date +%Y)
-previous_year=$((current_year - 1))
+# Function to extract timestamp from filename
+extract_timestamp_from_filename() {
+    local filename=$(basename "$1")
+    # Remove extension
+    local name_no_ext="${filename%.*}"
+    # Extract the timestamp portion (before the last underscore and number)
+    # Expected format: YYYY_MMDD_HHMMSS_NNN.MOV
+    local timestamp_part=$(echo "$name_no_ext" | sed -E 's/_[0-9]{3}$//')
+    
+    # Parse based on format
+    if [[ $timestamp_part =~ ^([0-9]{4})_([0-9]{4})_([0-9]{6})$ ]]; then
+        local year="${BASH_REMATCH[1]}"
+        local month_day="${BASH_REMATCH[2]}"
+        local time="${BASH_REMATCH[3]}"
+        
+        local month="${month_day:0:2}"
+        local day="${month_day:2:2}"
+        local hour="${time:0:2}"
+        local minute="${time:2:2}"
+        local second="${time:4:2}"
+        
+        # Convert to Unix timestamp
+        date -d "${year}-${month}-${day} ${hour}:${minute}:${second}" +%s 2>/dev/null
+    else
+        echo "0"
+    fi
+}
 
-# Get sorted list of MOV files by directory presence age
-# Reconstruct timestamps: use current year unless that makes it future, then use previous year
+# Get sorted list of MOV files
+# Extract timestamp from filename for grouping, but use mtime for age checking
 mapfile -t files < <(
-    find "$SOURCE_DIR" -maxdepth 1 -type f -iname "*.mov" -printf "%T@ %p\n" |
-    awk -v ref="$ref_time" -v min_age="$MIN_AGE_SECONDS" -v now="$now" -v cur_year="$current_year" -v prev_year="$previous_year" '
-    {
-        file_time = $1
-        filepath = $0
-        sub(/^[^ ]+ /, "", filepath)
-        
-        # Extract date components from file timestamp
-        cmd = "date -d @" file_time " +\"%m %d %H %M %S\""
-        cmd | getline date_parts
-        close(cmd)
-        
-        split(date_parts, parts, " ")
-        month = parts[1]
-        day = parts[2]
-        hour = parts[3]
-        minute = parts[4]
-        second = parts[5]
-        
-        # Try with current year first
-        test_date = cur_year "-" month "-" day " " hour ":" minute ":" second
-        cmd2 = "date -d \"" test_date "\" +%s"
-        cmd2 | getline test_time
-        close(cmd2)
-        
-        # If that would be in the future, use previous year instead
-        if (test_time > now) {
-            new_date = prev_year "-" month "-" day " " hour ":" minute ":" second
-            cmd3 = "date -d \"" new_date "\" +%s"
-            cmd3 | getline file_time
-            close(cmd3)
-        } else {
-            file_time = test_time
-        }
-        
-        # Check if file is old enough
-        if (file_time <= (ref - min_age)) {
-            print file_time " " filepath
-        }
-    }' |
+    find "$SOURCE_DIR" -maxdepth 1 -type f -iname "*.mov" -print0 |
+    while IFS= read -r -d '' file; do
+        filename_timestamp=$(extract_timestamp_from_filename "$file")
+        if [ "$filename_timestamp" != "0" ]; then
+            echo "$filename_timestamp $file"
+        fi
+    done |
     sort -n | cut -d' ' -f2-
 )
 
@@ -81,9 +63,45 @@ fi
 
 group=()
 first_time=0
+last_time=0
+
+# Function to format seconds into human-readable time
+format_time() {
+    local total_seconds=$1
+    local hours=$((total_seconds / 3600))
+    local minutes=$(((total_seconds % 3600) / 60))
+    local seconds=$((total_seconds % 60))
+    
+    if [ $hours -gt 0 ]; then
+        echo "${hours}h ${minutes}m ${seconds}s"
+    elif [ $minutes -gt 0 ]; then
+        echo "${minutes}m ${seconds}s"
+    else
+        echo "${seconds}s"
+    fi
+}
 
 join_group() {
     if [ "${#group[@]}" -ge 1 ]; then
+        # Find the most recent file in the group (highest mtime)
+        max_mtime=0
+        for f in "${group[@]}"; do
+            file_mtime=$(stat -c %Y "$f")
+            if [ "$file_mtime" -gt "$max_mtime" ]; then
+                max_mtime=$file_mtime
+            fi
+        done
+        
+        # Calculate age of most recent file
+        min_age=$(( now - max_mtime ))
+        
+        # Only process if the youngest file is old enough
+        if [ "$min_age" -lt "$MIN_AGE_SECONDS" ]; then
+            echo "Skipping group - youngest file is only $(format_time $min_age) old (need $(format_time $MIN_AGE_SECONDS))"
+            group=()
+            return
+        fi
+        
         # Format output file name
         timestamp=$(date -d @"$first_time" +"%Y-%m-%d_%H-%M-%S")
         
@@ -111,6 +129,7 @@ join_group() {
             echo "Processing succeeded. Deleting original files..."
             for f in "${group[@]}"; do
                 #rm -v -- "$f"
+                echo "Dry run, not running rm -v -- $f"
             done
         else
             echo "Processing failed with status $ffmpeg_status. Keeping original files."
@@ -120,7 +139,13 @@ join_group() {
 }
 
 for f in "${files[@]}"; do
-    file_time=$(stat -c %Y "$f")
+    # Use filename timestamp for grouping
+    file_time=$(extract_timestamp_from_filename "$f")
+    
+    if [ "$file_time" == "0" ]; then
+        echo "Warning: Could not parse timestamp from filename: $f"
+        continue
+    fi
 
     if [ ${#group[@]} -eq 0 ]; then
         group=("$f")
