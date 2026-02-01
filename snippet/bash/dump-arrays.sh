@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-OUTPUT_DIRECTORY="~/array-dump"
+OUTPUT_DIRECTORY="$HOME/array-dump"
 mkdir -p "$OUTPUT_DIRECTORY"
 
 declare -a indexed_array_01=()
@@ -61,5 +61,5 @@ dump_all_arrays_to_files() {
     echo "All arrays dumped to individual files in $out"
 }
 
-populate_arrays()
-dump_all_arrays_to_files()
+populate_arrays
+dump_all_arrays_to_files
