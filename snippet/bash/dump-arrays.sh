@@ -13,6 +13,7 @@ declare -A ASSOCIATIVE_ARRAY_14=()
 
 populate_arrays(){
     # Your code for data goes here
+    echo ''
 }
 
 dump_all_arrays_to_files() {
